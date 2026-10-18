@@ -126,3 +126,56 @@ def test_calibrate_keeps_the_session_it_measured(tmp_path, capsys):
 
     assert session.exists()
     assert main(["replay", str(session), "--no-audit"]) == 0
+
+
+def test_run_can_record_the_session_it_just_saw(monkeypatch, tmp_path, capsys):
+    """The whole point of the project is the command that arrives when nobody
+    asked. Without a recording, that command cannot be replayed."""
+    seen = {}
+
+    def fake_camera(**kwargs):
+        seen.update(kwargs)
+        return iter(())
+
+    monkeypatch.setattr("ito.cli.camera_features", fake_camera)
+    out = tmp_path / "live.jsonl"
+
+    assert main(["run", "--no-audit", "--record", str(out)]) == 0
+
+    assert seen["landmarks_out"] == out
+    captured = capsys.readouterr().out
+    assert "recording landmarks" in captured
+    assert "replay this session with" in captured
+
+
+def test_explain_names_the_line_it_could_not_read(tmp_path, capsys):
+    path = tmp_path / "audit.jsonl"
+    path.write_text(json.dumps(command(1000)) + "\n" + '{"ts": "2026-10-18T09:0', encoding="utf-8")
+
+    assert main(["explain", str(path)]) == 2
+
+    err = capsys.readouterr().err
+    assert ":2:" in err
+    assert "not valid JSON" in err
+
+
+def test_replay_names_the_line_it_could_not_read(tmp_path, capsys):
+    path = tmp_path / "recording.jsonl"
+    path.write_text(
+        '{"t_ms": 0, "features": {"roll_deg": 0, "ear": 0.3}}\n{"t_ms": 33,', encoding="utf-8"
+    )
+
+    assert main(["replay", str(path), "--no-audit"]) == 2
+
+    err = capsys.readouterr().err
+    assert "cut off mid-write" in err
+
+
+def test_config_init_prints_something_that_loads(capsys):
+    import yaml
+
+    from ito.config import from_dict
+
+    assert main(["config", "init"]) == 0
+    text = capsys.readouterr().out
+    assert from_dict(yaml.safe_load(text)).actions

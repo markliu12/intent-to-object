@@ -84,7 +84,10 @@ ito run --show        # dry run: prints and logs intents, publishes nothing
 ```bash
 ito run --mqtt                  # publish to the broker in your config
 ito run --mqtt --confirm        # also ask a human before any medium-risk action
+ito run --mqtt --record logs/session.jsonl   # keep the landmarks this session saw
 ```
+
+A command that arrived at 3 a.m. is the one you cannot reproduce on demand, so `--record` keeps the frame-by-frame landmarks of a live session and `ito replay` re-runs it through the current thresholds. The file is a measurement of one person's face: gitignored, and it stays on your machine.
 
 Any MQTT subscriber is a valid output. A common one:
 

@@ -49,6 +49,10 @@ names the claim that was false.
   indistinguishable from a working one. Gaps between usable frames longer than
   `perception.face_lost_warn_s` are now warned about live and counted in the
   session summary (`face_gaps`, `max_gap_ms`).
+- **A log with a half-written last line raised a JSON traceback.** The log is
+  flushed per record, so a crash leaves one truncated line and `ito explain`
+  died with a decoder error. `explain`, `review` and `replay` now name the file
+  and line, and say that the earlier records are still readable.
 
 ### Added
 
@@ -62,6 +66,12 @@ names the claim that was false.
   fitted config (gitignored) and prints the `ito replay` command, so a threshold
   decision can be re-examined later without asking the person to perform the
   movement again. GOVERNANCE.md already assumed this was possible; it was not.
+- **`ito run --record`** keeps the landmarks of a live session, because the
+  command that arrived at 3 a.m. is the one that cannot be reproduced on
+  demand. `ito replay` then re-runs it through the current thresholds.
+- A warning when two actions publish to the same topic: the payload still says
+  which action fired, but a subscriber that switches on the topic alone will
+  treat them as one.
 - A warning when `mqtt.username` is set, because the config is plain text and
   `docs/safety.md` asks people to paste it into issues.
 - `tests/test_cli.py`, and `tests/test_sinks.py` now drives `MqttSink` through a
@@ -77,6 +87,9 @@ names the claim that was false.
   to do. The packaging and the diagnostic disagreed about the supported range.
 - Formatting is now enforced in CI (`ruff format --check`), and the test matrix
   includes 3.11 instead of skipping it.
+- `mypy` runs in CI and is clean on `src/`, and `pytest` has a 75% coverage
+  floor (78% today). Both are about the same thing: the decision path is the
+  product, and it should not be possible to lose its tests without noticing.
 
 ## 0.2.0
 

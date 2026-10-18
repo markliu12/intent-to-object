@@ -129,3 +129,13 @@ def test_shipped_example_does_not_drift_from_the_builtin_default():
     assert example["actions"][0]["scorer_params"] == builtin["actions"][0]["scorer_params"]
     assert example["actions"][0]["gate"] == builtin["actions"][0]["gate"]
     assert example["perception"] == builtin["perception"]
+
+
+def test_two_actions_on_one_topic_produce_a_warning():
+    raw = default_dict()
+    first = raw["actions"][0]
+    raw["actions"].append(
+        dict(first, name="blink_left", scorer="blink", scorer_params={"start_ratio": 0.3})
+    )
+    cfg = from_dict(raw)
+    assert any("same topic" in w for w in cfg.warnings)

@@ -28,8 +28,12 @@ jobs:
       # review nobody performs.
       - name: format
         run: ruff format --check src tests
+      - name: types
+        run: mypy
+      # The coverage floor is a ratchet, not a target: it stops the decision
+      # path from quietly losing the tests that make it believable.
       - name: tests
-        run: pytest -q
+        run: pytest -q --cov=ito --cov-report=term-missing:skip-covered --cov-fail-under=75
       - name: the chain runs without a camera
         run: ito selftest
       - name: shipped config is valid

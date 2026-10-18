@@ -111,6 +111,16 @@ class Config:
                     "two actions use the same scorer with the same direction; "
                     "they would fire together. Give each action its own movement."
                 )
+            topics = [a.topic for a in self.actions]
+            shared = sorted({t for t in topics if topics.count(t) > 1})
+            if shared:
+                # Legal -- the payload still says which action fired -- but a
+                # subscriber that switches on the topic alone will toggle the
+                # lamp for both movements, which is never what was meant.
+                self.warnings.append(
+                    f"two actions publish to the same topic {shared[0]!r}; a subscriber "
+                    "that looks only at the topic cannot tell them apart"
+                )
 
         for action in self.actions:
             g = action.gate

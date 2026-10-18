@@ -24,7 +24,7 @@ from .config import Config, ConfigError, load
 from .pipeline import Pipeline
 from .policy import StdinConfirmer
 from .report import format_summary
-from .sinks import ConsoleSink, MqttSink, MultiSink, NullSink
+from .sinks import ConsoleSink, MqttSink, MultiSink, NullSink, Sink
 from .sources import SourceError, camera_features, replay_features, synthetic_features
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -36,7 +36,7 @@ def _load(args) -> Config:
 
 
 def _make_sink(args, config: Config):
-    sinks = []
+    sinks: list[Sink] = []
     if not getattr(args, "quiet", False):
         sinks.append(ConsoleSink())
     if getattr(args, "mqtt", False):
@@ -297,12 +297,14 @@ def cmd_run(args) -> int:
     for w in config.warnings:
         print(f"! {w}", file=sys.stderr)
     cam = config.camera
+    record_to = Path(args.record) if getattr(args, "record", None) else None
     source = camera_features(
         camera_index=int(args.camera if args.camera is not None else cam.get("index", 0)),
         width=int(cam.get("width", 640)),
         height=int(cam.get("height", 480)),
         duration_s=args.duration,
         show=args.show,
+        landmarks_out=record_to,
     )
     pipe = Pipeline(
         config,
@@ -328,6 +330,8 @@ def cmd_run(args) -> int:
         print(f"publishing to {config.mqtt.get('host')}:{config.mqtt.get('port')}")
     else:
         print("dry run: intents are printed and logged but not published (add --mqtt)")
+    if record_to:
+        print(f"recording landmarks to {record_to} -- treat the file as personal data")
     print()
     try:
         stats = pipe.run(source)
@@ -337,6 +341,10 @@ def cmd_run(args) -> int:
         print("stopped.")
     print()
     print(format_summary(stats, config, label="live session", user_session=True))
+    if record_to:
+        print()
+        print(f"replay this session with:  ito replay {record_to}")
+        print("it reproduces the same decisions only while the thresholds stay unchanged")
     return 0
 
 
@@ -565,6 +573,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--camera", type=int, default=None, help="camera index (default from config)")
     p.add_argument("--duration", type=float, default=None)
     p.add_argument("--show", action="store_true", help="show the camera window")
+    p.add_argument(
+        "--record",
+        help="save the landmarks of this session, so a false trigger can be replayed "
+        "with `ito replay` instead of waiting for it to happen again",
+    )
     p.add_argument(
         "--confirm",
         action="store_true",

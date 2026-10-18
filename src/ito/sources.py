@@ -113,11 +113,20 @@ def replay_features(path: Path) -> Iterator[Features]:
         raise SourceError(f"recording not found: {path}")
     aspect = DEFAULT_ASPECT
     with path.open("r", encoding="utf-8") as fh:
-        for line in fh:
+        for lineno, line in enumerate(fh, start=1):
             line = line.strip()
             if not line:
                 continue
-            row = json.loads(line)
+            # A recording can end mid-write (the process was interrupted, the
+            # disk filled). Say which line and why, instead of a JSON traceback.
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise SourceError(
+                    f"{path}:{lineno}: this line is not valid JSON; the recording was "
+                    "probably cut off mid-write. Re-record, or delete the truncated "
+                    "last line and replay the rest."
+                ) from exc
             t_ms = int(row.get("t_ms", 0))
             if "features" in row:
                 f = row["features"]

@@ -42,6 +42,16 @@ Tests must pass on a machine with no camera, no broker and no MediaPipe — that
 
 Anything that changes thresholds, filtering or timing needs a test that states the property being protected, not just the current output. `tests/test_gate.py` is the model: it asserts *"holding for four seconds produces one command"*, which is a promise, not a snapshot.
 
+The bar CI enforces, so run it before opening a pull request:
+
+```bash
+ruff check src tests && ruff format --check src tests
+mypy
+pytest -q --cov=ito --cov-fail-under=75
+```
+
+`mypy` is clean on the core, and the coverage floor is a ratchet: it exists so the decision path cannot quietly lose the tests that make it believable. If a change cannot clear it, the conversation is about the change, not about lowering the number. `sources.py` is the one file that will never be fully covered — the camera path needs a camera, and a test that needs hardware belongs in your own repository.
+
 ## Style
 
 - Comments explain *why*, and are expected next to anything surprising. The code says what it does.

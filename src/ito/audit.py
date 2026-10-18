@@ -104,9 +104,30 @@ def render_record(record: dict[str, Any]) -> str:
     return f"{ts}  {action} held {dwell} ms at confidence {score:.2f} -> declined ({reason})"
 
 
+class AuditLogError(RuntimeError):
+    """A log that cannot be trusted to describe what happened."""
+
+
 def read_jsonl(path: Path):
-    with Path(path).open("r", encoding="utf-8") as fh:
-        for line in fh:
+    """Read records, naming the line that is broken.
+
+    A log is appended to and flushed per record, so a crash or a full disk
+    leaves a half-written last line. That is expected; a traceback out of
+    `ito explain` is not -- the person reading the log is a care worker, and
+    "line 1431 is not valid JSON, the log was probably cut off mid-write" is
+    something they can act on.
+    """
+    path = Path(path)
+    with path.open("r", encoding="utf-8") as fh:
+        for lineno, line in enumerate(fh, start=1):
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            try:
                 yield json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise AuditLogError(
+                    f"{path}:{lineno}: this line is not valid JSON. The file was probably "
+                    "cut off mid-write; the records before it are still readable with a "
+                    "text editor."
+                ) from exc

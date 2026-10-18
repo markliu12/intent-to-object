@@ -77,7 +77,7 @@ def _longest_run_ms(frames: list[Features], above: list[bool]) -> float:
             if start_t is None:
                 start_t = frame.t_ms
             last_t = frame.t_ms
-        elif start_t is not None:
+        elif start_t is not None and last_t is not None:
             best = max(best, float(last_t - start_t))
             start_t = None
     if start_t is not None and last_t is not None:

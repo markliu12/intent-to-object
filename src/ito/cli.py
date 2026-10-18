@@ -488,18 +488,19 @@ def cmd_doctor(args) -> int:
     try:
         import mediapipe
 
-        py = sys.version_info
         print(f"mediapipe        {mediapipe.__version__}")
-        if not hasattr(mediapipe, "solutions"):
-            print("                 this build has no 'solutions' API; pin mediapipe<0.11")
+        has_face_api = False
+        try:
+            from mediapipe.tasks.python.vision import FaceLandmarker  # noqa: F401
+
+            has_face_api = True
+        except ImportError:
+            has_face_api = hasattr(mediapipe, "solutions")
+        if not has_face_api:
+            print("                 no face API in this build; pip install 'mediapipe>=0.10'")
             ok = False
-        if py >= (3, 13):
-            print(
-                f"                 warning: mediapipe rarely ships wheels for {py.major}.{py.minor}"
-            )
     except ImportError:
         print("mediapipe        missing (needed for camera) -- pip install '.[camera]'")
-        print("                 note: mediapipe has no wheels for Python 3.13+; use 3.10-3.12")
 
     try:
         import paho.mqtt.client  # noqa: F401
@@ -594,7 +595,7 @@ def cmd_setup(args) -> int:
     if need_camera:
         required += [
             ("cv2", "pip install '.[camera]'"),
-            ("mediapipe", "pip install '.[camera]'  (Python 3.10-3.12)"),
+            ("mediapipe", "pip install '.[camera]'"),
         ]
     missing = [(module, fix) for module, fix in required if _module_missing(module)]
     if missing:

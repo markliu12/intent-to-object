@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **The camera works on Python 3.13+ again.** MediaPipe removed the legacy
+  `solutions.face_mesh` API this project depended on, and its modern
+  `FaceLandmarker` needs an explicit model file. `sources.py` now prefers
+  `FaceLandmarker` (downloading the model once into the user cache), falls back
+  to `solutions.face_mesh` for older installs, and `doctor` detects the modern
+  API instead of telling everyone to `pin mediapipe<0.11`. The `camera` extra's
+  `<0.11` cap is gone — either side of that boundary now works.
+
 ## 0.3.0
 
 The theme: **the first run is one command and one question.** Everything in

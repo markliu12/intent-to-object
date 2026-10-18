@@ -165,18 +165,107 @@ def _open_camera(index: int, width: int, height: int):
     return cv2, cap
 
 
+_FACEMESH_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/"
+    "face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+)
+
+
+def _face_landmarker_model_path() -> Path:
+    """Locate (and, on first use, download) the FaceLandmarker model.
+
+    MediaPipe's legacy ``solutions.face_mesh`` shipped its model inside the
+    wheel. The modern ``FaceLandmarker`` API does not: the model is a separate
+    ``.task`` file the caller must supply. We keep one copy in the user cache
+    and download it once, so a person never has to fetch a model by hand.
+    """
+    import os
+
+    cache = Path(os.environ.get("ITO_MODEL_DIR") or Path.home() / ".cache" / "intent-to-object")
+    target = cache / "face_landmarker.task"
+    if target.is_file() and target.stat().st_size > 0:
+        return target
+
+    cache.mkdir(parents=True, exist_ok=True)
+    import urllib.request
+
+    tmp = target.with_suffix(".task.part")
+    try:
+        with urllib.request.urlopen(_FACEMESH_MODEL_URL, timeout=30) as resp, tmp.open("wb") as fh:
+            while True:
+                chunk = resp.read(1 << 16)
+                if not chunk:
+                    break
+                fh.write(chunk)
+        tmp.replace(target)
+    except Exception as exc:
+        tmp.unlink(missing_ok=True)
+        raise SourceError(
+            "could not download the FaceLandmarker model. If this machine has no "
+            f"internet, copy it to {target} by hand, or set ITO_MODEL_DIR. "
+            f"({type(exc).__name__}: {exc})"
+        ) from exc
+    return target
+
+
 def _face_mesh():
+    """Return a face landmarker in whichever API this MediaPipe build offers.
+
+    MediaPipe 0.10.x removed the ``solutions.face_mesh`` API this project used
+    to depend on, and now ships ``FaceLandmarker`` (which needs an explicit
+    model file). Prefer the modern API; fall back to the legacy one so people
+    still on an older install keep working.
+    """
     try:
         import mediapipe as mp
     except ImportError as exc:
-        raise SourceError(
-            "perception needs MediaPipe: pip install '.[camera]' "
-            "(Python 3.10-3.12; MediaPipe has no 3.13+ wheels yet)"
-        ) from exc
+        raise SourceError("perception needs MediaPipe: pip install '.[camera]'") from exc
+
+    # Modern API (mediapipe >= 0.10): FaceLandmarker + an explicit model file.
+    try:
+        from mediapipe.tasks.python import BaseOptions
+        from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions
+        from mediapipe.tasks.python.vision.core.vision_task_running_mode import (
+            VisionTaskRunningMode,
+        )
+
+        options = FaceLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=str(_face_landmarker_model_path())),
+            running_mode=VisionTaskRunningMode.VIDEO,
+            num_faces=1,
+            min_face_detection_confidence=0.5,
+            min_face_presence_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+        landmarker = FaceLandmarker.create_from_options(options)
+
+        class _ModernFaceMesh:
+            """Adapt the modern FaceLandmarker to the legacy shape the loop uses."""
+
+            def process(self, rgb):
+                from mediapipe import Image as MpImage
+                from mediapipe import ImageFormat
+
+                mp_image = MpImage(image_format=ImageFormat.SRGB, data=rgb)
+                return landmarker.detect_for_video(mp_image, 0)
+
+            def close(self):
+                landmarker.close()
+
+        return _ModernFaceMesh()
+    except SourceError:
+        raise
+    except Exception:
+        # Fall through to the legacy API below.
+        pass
 
     solutions = getattr(mp, "solutions", None)
     if solutions is None:
-        raise SourceError("this build of MediaPipe has no 'solutions' API; pin mediapipe<0.11")
+        raise SourceError(
+            "this MediaPipe build has no usable face API. Install one with "
+            "'pip install mediapipe>=0.10' (both the legacy solutions.face_mesh "
+            "and the modern FaceLandmarker are supported)."
+        )
     return solutions.face_mesh.FaceMesh(
         static_image_mode=False,
         max_num_faces=1,
@@ -219,15 +308,20 @@ def camera_features(
             rgb = cv2.cvtColor(cv2.flip(frame, 1), cv2.COLOR_BGR2RGB)
             result = mesh.process(rgb)
             t_ms = _t(elapsed)
-            if not result.multi_face_landmarks:
+            landmarks = getattr(result, "face_landmarks", None)
+            if landmarks is None:
+                # Legacy solutions.face_mesh result.
+                landmarks = getattr(result, "multi_face_landmarks", None)
+            if not landmarks:
                 # Nothing is yielded, and the pipeline reads the resulting gap in
                 # t_ms as "no usable frame" -- counting it here as well used to
                 # produce a number nothing ever read.
                 continue
-            pts = np.array(
-                [[p.x, p.y, p.z] for p in result.multi_face_landmarks[0].landmark],
-                dtype=float,
-            )
+            face = landmarks[0]
+            if hasattr(face, "landmark"):
+                # Legacy: each face is a container with a .landmark list.
+                face = face.landmark
+            pts = np.array([[p.x, p.y, p.z] for p in face], dtype=float)
             if out:
                 out.write(
                     json.dumps({"t_ms": t_ms, "aspect": aspect, "landmarks": pts.round(6).tolist()})

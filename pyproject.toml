@@ -22,9 +22,10 @@ classifiers = [
 dependencies = ["numpy>=1.23", "pyyaml>=6.0"]
 
 [project.optional-dependencies]
-# the upper bound is not decoration: `ito doctor` tells users to pin below 0.11
-# when the 'solutions' API is gone, so the extra must not resolve above it
-camera = ["opencv-python>=4.8", "mediapipe>=0.10,<0.11"]
+# mediapipe>=0.10 removed the legacy solutions.face_mesh API; the camera source
+# prefers the modern FaceLandmarker and falls back to the legacy one, so either
+# side of the 0.11 boundary works.
+camera = ["opencv-python>=4.8", "mediapipe>=0.10"]
 mqtt = ["paho-mqtt>=2.0"]
 dev = ["pytest>=7.0", "pytest-cov>=5.0", "ruff>=0.6", "mypy>=1.10"]
 

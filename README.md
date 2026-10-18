@@ -22,7 +22,7 @@ Nothing leaves the machine. No account, no subscription, no cloud.
 | First run | `ito setup` — checks the machine, asks one question, calibrates, writes `config.yaml` |
 | Calibration | `ito calibrate` fits thresholds from 20 seconds of movement, lowers the dwell to what you can actually hold, and refuses when the movement is not separable from rest |
 | Measurement | latency, false triggers per hour, missed commands, and re-calibration time are produced by the tool, not estimated by hand |
-| Platforms | Python 3.10+ for the core; Python 3.10–3.12 for the camera |
+| Platforms | Python 3.10+ for the core and the camera |
 | Users tested | **zero.** There are no human-subject numbers in this repository yet |
 
 What is deliberately *not* here: multiple simultaneous gestures, a trained classifier, mobile app, nurses' station, or any support for locks, gas, beds and nurse-call. See [docs/safety.md](docs/safety.md).
@@ -69,13 +69,12 @@ ito review logs/audit.jsonl   # mark each command intended/unintended, count the
 
 ## With a camera
 
-MediaPipe has no wheels for Python 3.13+ yet, so use 3.10–3.12:
-
 ```bash
-python3.12 -m venv .venv && . .venv/bin/activate
 pip install -e ".[camera]"
 ito setup
 ```
+
+The camera source prefers MediaPipe's modern `FaceLandmarker` API and falls back to the legacy `solutions.face_mesh`, so any recent `mediapipe` install works — including on Python 3.13+. On first use it downloads the face model once into `~/.cache/intent-to-object/`.
 
 `ito setup` checks this machine, asks which movement you will use (tilt left, tilt right, or eyes held closed), records twenty seconds of rest and movement, fits the thresholds, verifies that they fire, and writes `config.yaml`. `ito run` in that directory reads that file without a flag — so the first real run is one command and one question, not an edit to a YAML file you have not seen before.
 

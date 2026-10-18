@@ -50,13 +50,12 @@ ito review logs/audit.jsonl   # 逐条标记是否有意 + 统计漏触发 → �
 
 ## 接摄像头
 
-MediaPipe 目前没有 Python 3.13 的轮子，请用 3.10–3.12：
-
 ```bash
-python3.12 -m venv .venv && . .venv/bin/activate
 pip install -e ".[camera]"
 ito setup
 ```
+
+摄像头优先使用 MediaPipe 新版 `FaceLandmarker` 接口，并回退到旧版 `solutions.face_mesh`，所以任意较新版本的 `mediapipe` 都能用——包括 Python 3.13+。首次使用时会自动把模型下载一次到 `~/.cache/intent-to-object/`。
 
 `ito setup` 会检查本机依赖、问你用哪个动作（头向左倾 / 头向右倾 / 闭眼保持）、录 20 秒静息和动作、
 拟合阈值、验证"确实能触发"，然后写出 `config.yaml`。在这个目录里 `ito run` 会自动读这个文件——

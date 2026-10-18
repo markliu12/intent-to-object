@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- **`run-detect.bat`.** A double-click entry point for Windows: it runs
+  `ito run --show` against the local `.venv` (detect only, publishes nothing)
+  and prints setup instructions if the environment is missing. The tool's users
+  are not terminal users, so the first run should not start at a shell prompt.
+
 ### Changed
 
 - **MQTT credentials can live in the environment instead of the config file.**

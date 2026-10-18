@@ -34,11 +34,9 @@ def render_payload(template: str, context: dict[str, Any]) -> str:
 class Sink(Protocol):
     name: str
 
-    def publish(self, topic: str, payload: str) -> None:
-        ...
+    def publish(self, topic: str, payload: str) -> None: ...
 
-    def close(self) -> None:
-        ...
+    def close(self) -> None: ...
 
 
 class NullSink:
@@ -83,16 +81,12 @@ class MqttSink:
         try:
             import paho.mqtt.client as mqtt
         except ImportError as exc:  # pragma: no cover - depends on extras
-            raise RuntimeError(
-                "MQTT output needs paho-mqtt: pip install '.[mqtt]'"
-            ) from exc
+            raise RuntimeError("MQTT output needs paho-mqtt: pip install '.[mqtt]'") from exc
 
         self.qos = qos
         self.retain = retain
         self._mqtt = mqtt
-        self.client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2, client_id=client_id
-        )
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
         if username:
             self.client.username_pw_set(username, password)
         self.client.connect(host, port, keepalive=30)

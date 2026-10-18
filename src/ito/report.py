@@ -43,8 +43,7 @@ def format_summary(
     lines.append(f"published         {stats.published}")
     lines.append(f"blocked by policy {stats.blocked}")
     lines.append(
-        f"dwells cancelled  {stats.cancelled_dwells}"
-        "  (movement started, released too early)"
+        f"dwells cancelled  {stats.cancelled_dwells}  (movement started, released too early)"
     )
 
     if hours > 0:
@@ -88,17 +87,13 @@ def format_summary(
     else:
         lines.append("frame->publish    not measurable: this source has no camera timestamp")
     if stats.baseline_max > 0:
-        lines.append(
-            f"ear baseline      {stats.baseline_min:.3f} .. {stats.baseline_max:.3f}"
-        )
+        lines.append(f"ear baseline      {stats.baseline_min:.3f} .. {stats.baseline_max:.3f}")
 
     if stats.per_action:
         lines.append("")
         lines.append(f"{'action':<18}{'fired':>7}{'sent':>7}{'cancelled':>11}")
         for name, e in stats.per_action.items():
-            lines.append(
-                f"{name:<18}{e['fired']:>7}{e['published']:>7}{e['cancelled']:>11}"
-            )
+            lines.append(f"{name:<18}{e['fired']:>7}{e['published']:>7}{e['cancelled']:>11}")
 
     if config and config.warnings:
         lines.append("")

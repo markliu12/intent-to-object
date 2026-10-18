@@ -109,9 +109,7 @@ def extract_features(
 
     xy = aspect_correct(pts[:, :2], aspect)
 
-    ear = 0.5 * (
-        _eye_aspect_ratio(xy, RIGHT_EYE_EAR) + _eye_aspect_ratio(xy, LEFT_EYE_EAR)
-    )
+    ear = 0.5 * (_eye_aspect_ratio(xy, RIGHT_EYE_EAR) + _eye_aspect_ratio(xy, LEFT_EYE_EAR))
 
     right_c = xy[list(RIGHT_EYE_CORNERS)].mean(axis=0)
     left_c = xy[list(LEFT_EYE_CORNERS)].mean(axis=0)

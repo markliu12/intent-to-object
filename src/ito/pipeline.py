@@ -73,9 +73,7 @@ class Pipeline:
             Bound(a, build_scorer(a.scorer, a.scorer_params), Gate(a.gate, a.name))
             for a in config.actions
         ]
-        self.policy = Policy(
-            RateLimit(int(config.policy.get("rate_limit_per_min", 20))), confirmer
-        )
+        self.policy = Policy(RateLimit(int(config.policy.get("rate_limit_per_min", 20))), confirmer)
         window = int(float(config.perception.get("baseline_window_s", 20.0)) * 1000)
         self.baseline = RollingBaseline(
             window_ms=window,
@@ -120,9 +118,7 @@ class Pipeline:
         stats.cancelled_dwells = sum(b.gate.cancelled for b in self.bound)
         for bound in self.bound:
             name = bound.action.name
-            entry = stats.per_action.setdefault(
-                name, {"fired": 0, "published": 0, "cancelled": 0}
-            )
+            entry = stats.per_action.setdefault(name, {"fired": 0, "published": 0, "cancelled": 0})
             entry["fired"] = bound.gate.fired
             entry["cancelled"] = bound.gate.cancelled
             entry["published"] = self._published.get(name, 0)

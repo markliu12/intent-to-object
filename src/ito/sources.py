@@ -149,8 +149,7 @@ def _open_camera(index: int, width: int, height: int):
     cap = cv2.VideoCapture(index)
     if not cap.isOpened():
         raise SourceError(
-            f"could not open camera index {index}. Close other apps using it, "
-            "or try --camera 1."
+            f"could not open camera index {index}. Close other apps using it, or try --camera 1."
         )
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
@@ -168,9 +167,7 @@ def _face_mesh():
 
     solutions = getattr(mp, "solutions", None)
     if solutions is None:
-        raise SourceError(
-            "this build of MediaPipe has no 'solutions' API; pin mediapipe<0.11"
-        )
+        raise SourceError("this build of MediaPipe has no 'solutions' API; pin mediapipe<0.11")
     return solutions.face_mesh.FaceMesh(
         static_image_mode=False,
         max_num_faces=1,
@@ -223,9 +220,7 @@ def camera_features(
             )
             if out:
                 out.write(
-                    json.dumps(
-                        {"t_ms": t_ms, "aspect": aspect, "landmarks": pts.round(6).tolist()}
-                    )
+                    json.dumps({"t_ms": t_ms, "aspect": aspect, "landmarks": pts.round(6).tolist()})
                     + "\n"
                 )
             yield extract_features(pts, t_ms=t_ms, aspect=aspect, captured_at=captured_at)

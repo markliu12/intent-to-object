@@ -56,9 +56,7 @@ class Config:
     mqtt: dict[str, Any] = field(
         default_factory=lambda: {"host": "localhost", "port": 1883, "qos": 0, "retain": False}
     )
-    policy: dict[str, Any] = field(
-        default_factory=lambda: {"rate_limit_per_min": 20}
-    )
+    policy: dict[str, Any] = field(default_factory=lambda: {"rate_limit_per_min": 20})
     output: dict[str, Any] = field(default_factory=lambda: {"audit_path": "logs/audit.jsonl"})
     actions: list[ActionConfig] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)

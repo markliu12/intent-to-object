@@ -182,8 +182,10 @@ def cmd_calibrate(args) -> int:
         ok = False
         print("not verified         thresholds were not written")
 
-    out = Path(args.out) if args.out else Path(
-        (args.config or "configs/example.yaml").replace(".yaml", "") + ".calibrated.yaml"
+    out = (
+        Path(args.out)
+        if args.out
+        else Path((args.config or "configs/example.yaml").replace(".yaml", "") + ".calibrated.yaml")
     )
     if suggestion.verdict != NOT_SEPARABLE:
         written = write_config(
@@ -309,9 +311,7 @@ def cmd_run(args) -> int:
 
 def cmd_replay(args) -> int:
     config = _load(args)
-    pipe = Pipeline(
-        config, _make_sink(args, config), _audit(args, config), on_event=_printer
-    )
+    pipe = Pipeline(config, _make_sink(args, config), _audit(args, config), on_event=_printer)
     stats = pipe.run(replay_features(Path(args.file)))
     print()
     print(format_summary(stats, config, label=f"replay {args.file}"))
@@ -399,8 +399,7 @@ def cmd_doctor(args) -> int:
             ok = False
         if py >= (3, 13):
             print(
-                "                 warning: mediapipe rarely ships wheels for "
-                f"{py.major}.{py.minor}"
+                f"                 warning: mediapipe rarely ships wheels for {py.major}.{py.minor}"
             )
     except ImportError:
         print("mediapipe        missing (needed for camera) -- pip install '.[camera]'")
@@ -416,8 +415,10 @@ def cmd_doctor(args) -> int:
     config_path = getattr(args, "config", None)
     try:
         config = load(Path(config_path) if config_path else None)
-        print(f"config           ok, {len(config.actions)} action(s): "
-              + ", ".join(f"{a.name}({a.risk})" for a in config.actions))
+        print(
+            f"config           ok, {len(config.actions)} action(s): "
+            + ", ".join(f"{a.name}({a.risk})" for a in config.actions)
+        )
         for w in config.warnings:
             print(f"                 ! {w}")
     except ConfigError as exc:

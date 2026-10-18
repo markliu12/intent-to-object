@@ -64,8 +64,7 @@ def render_record(record: dict[str, Any]) -> str:
         confirmed = record.get("confirmed")
         extra = "confirmed by a person" if confirmed else RISK_NOTE.get(tier, tier)
         return (
-            f"{ts}  {action} held {dwell} ms at confidence {score:.2f} "
-            f"-> sent to {dest} ({extra})"
+            f"{ts}  {action} held {dwell} ms at confidence {score:.2f} -> sent to {dest} ({extra})"
         )
 
     if reason == "not_confirmed":

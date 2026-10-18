@@ -23,10 +23,7 @@ UNINTENDED = "unintended"
 
 
 def _ask_command(record: dict, index: int, total: int) -> bool:
-    prompt = (
-        f"  [{index}/{total}] {render_record(record)}\n"
-        "      was this intended? [Y/n/q] "
-    )
+    prompt = f"  [{index}/{total}] {render_record(record)}\n      was this intended? [Y/n/q] "
     try:
         answer = input(prompt).strip().lower()
     except EOFError:

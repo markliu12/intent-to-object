@@ -17,8 +17,7 @@ from ..types import Features
 class Scorer(Protocol):
     name: str
 
-    def score(self, features: Features) -> float:
-        ...
+    def score(self, features: Features) -> float: ...
 
 
 def build_scorer(kind: str, params: dict | None = None) -> Scorer:

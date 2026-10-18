@@ -242,12 +242,20 @@ def _face_mesh():
         class _ModernFaceMesh:
             """Adapt the modern FaceLandmarker to the legacy shape the loop uses."""
 
+            def __init__(self):
+                self._ts_ms = 0
+
             def process(self, rgb):
                 from mediapipe import Image as MpImage
                 from mediapipe import ImageFormat
 
                 mp_image = MpImage(image_format=ImageFormat.SRGB, data=rgb)
-                return landmarker.detect_for_video(mp_image, 0)
+                # detect_for_video needs a monotonically increasing timestamp in
+                # milliseconds; passing a constant (0) makes the second frame
+                # raise "Input timestamp must be monotonically increasing."
+                result = landmarker.detect_for_video(mp_image, self._ts_ms)
+                self._ts_ms += 33  # ~30 fps; the exact step does not matter
+                return result
 
             def close(self):
                 landmarker.close()

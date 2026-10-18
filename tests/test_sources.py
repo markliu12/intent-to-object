@@ -65,6 +65,7 @@ def _install_fake_mediapipe(monkeypatch, *, with_tasks: bool = True, with_soluti
 
         class _Landmarker:
             created = None
+            last_timestamps = []
 
             def __init__(self):
                 self.closed = False
@@ -73,10 +74,12 @@ def _install_fake_mediapipe(monkeypatch, *, with_tasks: bool = True, with_soluti
             @classmethod
             def create_from_options(cls, options):
                 cls.created = options
+                cls.last_timestamps = []
                 return cls()
 
             def detect_for_video(self, image, ts):
                 self.last_image = image
+                type(self).last_timestamps.append(ts)
                 result = types.SimpleNamespace(face_landmarks=[])
                 return result
 
@@ -133,6 +136,24 @@ def test_modern_api_is_preferred_over_legacy(monkeypatch, tmp_path):
     # The modern adapter exposes the process/close shape the loop relies on.
     assert hasattr(mesh, "process")
     assert hasattr(mesh, "close")
+
+
+def test_video_frames_carry_monotonically_increasing_timestamps(monkeypatch, tmp_path):
+    """detect_for_video raises if its timestamp does not increase, so the adapter
+    must feed it a rising value -- a constant 0 crashed on the second frame."""
+    mp = _install_fake_mediapipe(monkeypatch, with_tasks=True)
+    monkeypatch.setenv("ITO_MODEL_DIR", str(tmp_path / "models"))
+    model_dir = tmp_path / "models"
+    model_dir.mkdir(parents=True)
+    (model_dir / "face_landmarker.task").write_bytes(b"x" * 16)
+
+    mesh = _face_mesh()
+    for _ in range(3):
+        mesh.process(b"\x00" * 10)
+
+    timestamps = mp.tasks.python.vision.FaceLandmarker.last_timestamps
+    assert timestamps == sorted(timestamps)
+    assert len(set(timestamps)) == len(timestamps)  # strictly increasing, no repeats
 
 
 def test_legacy_api_is_the_fallback_when_tasks_are_absent(monkeypatch, tmp_path):

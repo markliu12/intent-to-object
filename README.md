@@ -83,6 +83,10 @@ ito doctor            # what is missing, if anything
 ito run --show        # dry run: prints and logs intents, publishes nothing
 ```
 
+On Windows, double-click `run-detect.bat` in the repo instead of opening a
+terminal: it runs `ito run --show` against the local `.venv` (detect only, no
+output), and tells you how to set the environment up if it is missing.
+
 `ito run` without `--mqtt` never sends anything. Publishing is opt-in, because the first time you point this at a real lamp you want to have watched it for a while first.
 
 ## With a real object

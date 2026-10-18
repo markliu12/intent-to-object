@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Deque, Iterator, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -35,7 +36,7 @@ class RollingBaseline:
         self.window_ms = window_ms
         self.min_samples = min_samples
         self.guard = guard
-        self._buf: Deque[Tuple[int, float]] = deque()
+        self._buf: deque[tuple[int, float]] = deque()
         self.value = 0.0
 
     def update(self, t_ms: int, ear: float) -> float:
@@ -60,15 +61,15 @@ class Pipeline:
         self,
         config: Config,
         sink: Sink,
-        audit: Optional[AuditLog] = None,
-        confirmer: Optional[Callable[[str, Fire], bool]] = None,
-        on_event: Optional[Callable[[dict], None]] = None,
+        audit: AuditLog | None = None,
+        confirmer: Callable[[str, Fire], bool] | None = None,
+        on_event: Callable[[dict], None] | None = None,
     ) -> None:
         self.config = config
         self.sink = sink
         self.audit = audit or AuditLog(None)
         self.on_event = on_event
-        self.bound: List[Bound] = [
+        self.bound: list[Bound] = [
             Bound(a, build_scorer(a.scorer, a.scorer_params), Gate(a.gate, a.name))
             for a in config.actions
         ]
@@ -82,11 +83,11 @@ class Pipeline:
         )
         self.stats = SessionStats()
         self._published: dict = {}
-        self._t0: Optional[int] = None
+        self._t0: int | None = None
         self._b_min = 0.0
         self._b_max = 0.0
 
-    def process(self, frame: Features) -> List[dict]:
+    def process(self, frame: Features) -> list[dict]:
         stats = self.stats
         stats.frames += 1
         if self._t0 is None:
@@ -101,15 +102,17 @@ class Pipeline:
             self._b_min = baseline if self._b_min == 0 else min(self._b_min, baseline)
             self._b_max = max(self._b_max, baseline)
 
-        out: List[dict] = []
+        out: list[dict] = []
         for bound in self.bound:
+            t_start = time.perf_counter()
             score = bound.scorer.score(frame)
             fire = bound.gate.update(frame.t_ms, score)
+            decision_us = (time.perf_counter() - t_start) * 1e6
             if fire is None:
                 continue
             stats.fired += 1
             decision = self.policy.evaluate(bound.action.risk, bound.action.name, fire)
-            record = self._apply(bound, fire, decision)
+            record = self._apply(bound, fire, decision, decision_us, frame.captured_at)
             out.append(record)
             if self.on_event:
                 self.on_event(record)
@@ -127,9 +130,18 @@ class Pipeline:
         stats.baseline_max = self._b_max
         return out
 
-    def _apply(self, bound: Bound, fire: Fire, decision: Decision) -> dict:
+    def _apply(
+        self,
+        bound: Bound,
+        fire: Fire,
+        decision: Decision,
+        decision_us: float,
+        captured_at: float = 0.0,
+    ) -> dict:
         action = bound.action
         payload = ""
+        publish_us = 0.0
+        frame_to_publish_ms: float | None = None
         if decision.allowed:
             payload = render_payload(
                 action.payload,
@@ -140,10 +152,17 @@ class Pipeline:
                     "t_ms": fire.t_ms,
                 },
             )
+            t_pub = time.perf_counter()
             self.sink.publish(action.topic, payload)
+            publish_us = (time.perf_counter() - t_pub) * 1e6
+            if captured_at > 0:
+                frame_to_publish_ms = round((time.perf_counter() - captured_at) * 1000.0, 2)
+                self.stats.frame_to_publish_ms.append(frame_to_publish_ms)
             self.stats.published += 1
             self._published[action.name] = self._published.get(action.name, 0) + 1
             self.stats.dwell_samples.append(fire.dwell_ms)
+            self.stats.decision_us.append(decision_us)
+            self.stats.publish_us.append(publish_us)
         else:
             self.stats.blocked += 1
 
@@ -160,13 +179,16 @@ class Pipeline:
                 "confirmed": decision.confirmed,
                 "topic": action.topic if decision.allowed else None,
                 "payload": payload or None,
+                "decision_us": round(decision_us, 1),
+                "publish_us": round(publish_us, 1),
+                "frame_to_publish_ms": frame_to_publish_ms,
             }
         )
 
     def run(
         self,
         source: Iterator[Features],
-        duration_s: Optional[float] = None,
+        duration_s: float | None = None,
     ) -> SessionStats:
         started = time.monotonic()
         try:
@@ -175,6 +197,9 @@ class Pipeline:
                 if duration_s is not None and time.monotonic() - started >= duration_s:
                     break
         finally:
+            # The session record is what makes `ito review` able to report a rate
+            # instead of a count.
+            self.audit.write(self.stats.as_summary())
             self.sink.close()
             self.audit.close()
         return self.stats

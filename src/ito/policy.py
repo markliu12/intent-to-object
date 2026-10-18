@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import sys
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Deque, Optional
 
 from .types import Decision, Fire
 
@@ -35,12 +35,12 @@ class RateLimit:
 class Policy:
     def __init__(
         self,
-        rate_limit: Optional[RateLimit] = None,
-        confirmer: Optional[Callable[[str, Fire], bool]] = None,
+        rate_limit: RateLimit | None = None,
+        confirmer: Callable[[str, Fire], bool] | None = None,
     ) -> None:
         self.rate_limit = rate_limit or RateLimit()
         self.confirmer = confirmer or deny
-        self._stamps: Deque[int] = deque()
+        self._stamps: deque[int] = deque()
 
     def evaluate(self, tier: str, action: str, fire: Fire) -> Decision:
         if tier not in TIERS:

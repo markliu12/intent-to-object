@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 
 @dataclass(frozen=True)
@@ -11,7 +10,13 @@ class Features:
     """Pose-normalised scalar features for a single frame.
 
     Angles are in degrees, ratios are dimensionless. ``t_ms`` is monotonic
-    milliseconds from an arbitrary epoch chosen by the source.
+    milliseconds from an arbitrary epoch chosen by the source, and is what the
+    gate and every log line use.
+
+    ``captured_at`` is a ``time.perf_counter()`` value taken the moment the
+    frame left the camera, or 0 for sources with no camera. It exists so that
+    frame-to-publish latency can be measured without pretending the feature
+    extraction stage is free.
     """
 
     t_ms: int
@@ -21,6 +26,7 @@ class Features:
     ear: float
     brow_raise: float
     ear_baseline: float = 0.0
+    captured_at: float = 0.0
 
     def as_dict(self) -> dict:
         return {
@@ -51,7 +57,7 @@ class Decision:
     allowed: bool
     reason: str
     tier: str = "low"
-    confirmed: Optional[bool] = None
+    confirmed: bool | None = None
 
 
 @dataclass
@@ -59,13 +65,17 @@ class SessionStats:
     """Everything needed to report the three MVP metrics honestly."""
 
     started_ms: int = 0
+    last_ms: int = 0
     frames: int = 0
     frames_scored: int = 0
     fired: int = 0
     published: int = 0
     blocked: int = 0
     cancelled_dwells: int = 0
-    dwell_samples: List[int] = field(default_factory=list)
+    dwell_samples: list[int] = field(default_factory=list)
+    frame_to_publish_ms: list[float] = field(default_factory=list)
+    decision_us: list[float] = field(default_factory=list)
+    publish_us: list[float] = field(default_factory=list)
     per_action: dict = field(default_factory=dict)
     baseline_min: float = 0.0
     baseline_max: float = 0.0
@@ -75,4 +85,21 @@ class SessionStats:
             return 0.0
         return max(0.0, (self.last_ms - self.started_ms) / 1000.0)
 
-    last_ms: int = 0
+    def as_summary(self) -> dict:
+        """The record written at the end of a session.
+
+        ``ito review`` needs it to compute false triggers per hour: a count of
+        unintended commands is meaningless without the exposure it happened
+        over.
+        """
+        return {
+            "kind": "session",
+            "frames": self.frames,
+            "frames_scored": self.frames_scored,
+            "duration_s": round(self.uptime_s(), 3),
+            "fired": self.fired,
+            "published": self.published,
+            "blocked": self.blocked,
+            "cancelled_dwells": self.cancelled_dwells,
+            "per_action": self.per_action,
+        }

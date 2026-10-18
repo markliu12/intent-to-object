@@ -18,7 +18,9 @@ logs/
 recordings/
 *.landmarks.jsonl
 
-# editors / os
+# editor / agent workspace state -- never publish
+.workbuddy/
+
 .vscode/
 .idea/
 .DS_Store

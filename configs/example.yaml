@@ -23,8 +23,11 @@ mqtt:
   retain: false
 
 policy:
+  # a stuck sensor or a looping replay cannot flood a topic past this
   rate_limit_per_min: 20
-  allow_medium: false
+  # whether a human is present for medium-risk confirmation is NOT configured
+  # here: it is `ito run --confirm`, because it is a property of the session,
+  # not of the file.
 
 output:
   audit_path: logs/audit.jsonl

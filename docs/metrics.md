@@ -29,6 +29,8 @@ Then:
 
 **Do not report the scorer's inference time as latency.** It is one row of the table.
 
+**What the tool already reports.** Every published record carries `decision_us`, `publish_us` and `frame_to_publish_ms`, and the session summary prints the median and p90 of frame-to-publish, split into scoring/gate and publish. That covers *frame exists → broker has it*, which is the part this project is responsible for. It deliberately does not claim to cover *onset → frame*: that interval is set by the camera and has to be measured as described above.
+
 ## 2. False-trigger rate
 
 **Definition.** Publications that the user did not intend, per hour, during a named activity.
@@ -52,6 +54,8 @@ Then:
 
 A configuration that halves the false-trigger rate by doubling the required movement is a regression for anyone with a progressive condition. Say so when you report it, even if the first number looks better.
 
+**What the tool already does.** Every run appends a session record carrying the exposure, and `ito review <log>` asks about each command one at a time and divides by that exposure. The asking cannot be automated: nobody has found a way to infer "the user did not mean that" from a camera, and a system that guesses about intent and then reports its own guess as accuracy is worse than a clipboard. The review must be answered by the user or their carer, not by whoever tuned the thresholds.
+
 ## 3. Re-calibration time
 
 **Definition.** Seconds from the user deciding "my movement is not being recognised today" to the new threshold being in effect and verified by a successful command.
@@ -61,6 +65,8 @@ A configuration that halves the false-trigger rate by doubling the required move
 Include: finding the file, understanding the two numbers, the edit, the restart, and the first good command. If it takes a maintainer 40 seconds because they know which line to edit, that is not the measurement — the measurement involves the user or their carer, alone.
 
 **Target: ≤ 30 s**, without the maintainer. Today this is a hand edit of `start_deg` / `full_deg` in a YAML file, which is honest but does not meet the target. A guided re-fit is the milestone that closes it.
+
+**What the tool already does.** `ito calibrate` prints its own elapsed time, measured from invocation to a configuration that has been *verified* by replaying the captured movement through it. Both halves matter: the time is only meaningful if the configuration at the end actually fires, so adopting the numbers without the verification would make the measurement a lie. On `--source synthetic` the elapsed time is not a measurement and the command says so.
 
 ## Reporting template
 

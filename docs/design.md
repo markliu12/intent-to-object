@@ -1,6 +1,6 @@
 # Design
 
-Status: describes v0.1 as built. Anything marked *planned* does not exist yet.
+Status: describes v0.2 as built. Anything marked *planned* does not exist yet.
 
 ## 1. The gap
 
@@ -103,7 +103,7 @@ Low publishes, medium asks a human, high refuses to load the configuration.
 
 Progressive conditions mean today's movement is not last month's. The architecture keeps thresholds in configuration that can be changed and verified in under a minute, and a recording can be replayed to check a change without asking the user to perform the movement again.
 
-*Wrong if:* re-calibration stays a hand edit of YAML forever. It currently is a hand edit; the target (≤ 30 s, unaided) is not met, and [metrics.md](metrics.md) says so.
+*Wrong if:* re-calibration stays a hand edit of YAML forever. Since v0.2 it is `ito calibrate`, which fits thresholds from 20 seconds of movement and reports its own elapsed time — but that path is still being run by the person who wrote it, so the unaided-user part of the target (≤ 30 s, someone who has never seen the config) is not yet met. [metrics.md](metrics.md) says so.
 
 ### D7. Handover is a file-layout property
 
@@ -111,18 +111,21 @@ The core imports numpy and the standard library. Perception and transport are si
 
 *Wrong if:* the project accumulates a component only one person understands. That is the failure mode this decision exists to prevent, and it is measured by whether a second maintainer can release without the first.
 
-## 6. Scope of v0.1
+## 6. Scope of v0.2
 
 | In | Out (and why) |
 |---|---|
 | one action: head tilt (left / right / any) | additional actions — until the first is clean for weeks |
 | held-blink scorer, configurable, off by default | facial-expression input — brow tracking quality is not there |
 | dwell / hysteresis / release gate | multi-gesture sequences |
-| risk tiers, confirmation, rate limit | nurse call, locks, beds — refused by design |
+| risk tiers, confirmation via `--confirm`, rate limit | nurse call, locks, beds — refused by design |
 | JSONL audit log + plain-language rendering | a web dashboard |
 | camera, replay, and scripted sources | a mobile app |
+| `ito calibrate` — guided re-fit that refuses unusable movements | automatic adoption of fitted thresholds without a diff |
+| `ito review` — false triggers per hour against a recorded exposure | automatic judgement of what the user "meant" |
+| latency, dwell and cancellation instrumentation in every session | any claim of measured accuracy |
 | `ito doctor` for dependency diagnosis | auto-install of anything |
-| scripted `ito demo` and CI | any claim of measured accuracy |
+| scripted `ito demo`, `ito selftest` and CI | — |
 
 ## 7. Roadmap
 
@@ -133,11 +136,11 @@ Camera → features → gate → policy → MQTT, with the whole decision path t
 *Exit:* `ito demo` and `pytest` both green on a clean machine. ✅
 
 **P2 — first real numbers**
-Three to five non-author participants, the protocol in [metrics.md](metrics.md).
+Three to five non-author participants, the protocol in [metrics.md](metrics.md). The tooling for all three metrics now exists (v0.2); what is missing is people.
 *Exit:* latency, false-trigger rate and re-calibration time reported for each, including the failures. No number, no P3.
 
-**P3 — guided re-fit**
-A command that takes 20–30 s of neutral and target movement and writes thresholds, with the old ones kept for rollback.
+**P3 — guided re-fit** *(tooling done, validation pending)*
+`ito calibrate` fits and self-verifies in one command. Still open: an unaccompanied participant, and a diff-and-adopt flow that shows what changed before the new thresholds take effect.
 *Exit:* a participant who has never seen the config file re-fits alone in ≤ 30 s.
 
 **P4 — adapter ecosystem**
@@ -183,6 +186,7 @@ Recorded because the differences are the design work, and future readers deserve
 | "护理呼叫" as a main-scenario function, and "护理呼叫" as a high-risk exclusion | nurse call is out of scope at every phase | the original contradicted itself in the two places that matter most |
 | BOM "under ¥10" | ¥20–45, itemised | the people who check this are the ones you want to trust you |
 | "误触发次数" as a metric | false triggers per hour, per activity, with the movement amplitude and a fatigue rating | a count with no denominator cannot be evaluated |
+| the three metrics as a section in a document | produced by the tool: `ito calibrate` times itself, the session record carries the exposure, `ito review` divides by it | a metric that requires a maintainer to compute is a metric that never gets computed |
 | "Eyes-off 意图触发器" | dropped; the action is named by what it is (`tilt_left`) | "eyes-off" means driver disengagement in every autonomy context; wrong connotation for a safety-adjacent tool |
 | "organisation account + two admins" at v0.1 | single maintainer now, with a written trigger for the second (see GOVERNANCE.md) | an org with one member and two admin slots is theatre |
 | 15-section strategy document as the README | short README + this file | a reader decides in thirty seconds whether a repository is alive, and a strategy document does not answer that |

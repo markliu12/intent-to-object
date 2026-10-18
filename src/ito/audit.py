@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import IO, Any, Dict, Optional
+from typing import IO, Any
 
 RISK_NOTE = {
     "low": "low risk, no confirmation needed",
@@ -22,14 +22,14 @@ RISK_NOTE = {
 
 
 class AuditLog:
-    def __init__(self, path: Optional[Path] = None) -> None:
+    def __init__(self, path: Path | None = None) -> None:
         self.path = Path(path) if path else None
-        self._fh: Optional[IO[str]] = None
+        self._fh: IO[str] | None = None
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._fh = self.path.open("a", encoding="utf-8")
 
-    def write(self, record: Dict[str, Any]) -> Dict[str, Any]:
+    def write(self, record: dict[str, Any]) -> dict[str, Any]:
         record = dict(record)
         record.setdefault("ts", datetime.now().isoformat(timespec="milliseconds"))
         if self._fh:
@@ -42,14 +42,14 @@ class AuditLog:
             self._fh.close()
             self._fh = None
 
-    def __enter__(self) -> "AuditLog":
+    def __enter__(self) -> AuditLog:
         return self
 
     def __exit__(self, *exc: object) -> None:
         self.close()
 
 
-def render_record(record: Dict[str, Any]) -> str:
+def render_record(record: dict[str, Any]) -> str:
     """One record as a sentence a non-programmer can act on."""
     ts = str(record.get("ts", ""))[11:19] or "??:??:??"
     action = record.get("action", "unknown")
@@ -69,7 +69,10 @@ def render_record(record: Dict[str, Any]) -> str:
         )
 
     if reason == "not_confirmed":
-        return f"{ts}  {action} held {dwell} ms at confidence {score:.2f} -> declined (nobody confirmed)"
+        return (
+            f"{ts}  {action} held {dwell} ms at confidence {score:.2f}"
+            " -> declined (nobody confirmed)"
+        )
     if reason == "rate_limited":
         return f"{ts}  {action} -> declined (too many commands per minute, possible stuck input)"
     if reason == "tier_high_unsupported":

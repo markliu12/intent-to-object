@@ -12,15 +12,17 @@ import argparse
 import platform
 import socket
 import sys
+import time
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
 from . import __version__
 from .audit import AuditLog, read_jsonl, render_record
+from .calibrate import NOT_SEPARABLE, fit, verify, write_config
 from .config import Config, ConfigError, load
 from .pipeline import Pipeline
+from .policy import StdinConfirmer
 from .report import format_summary
 from .sinks import ConsoleSink, MqttSink, MultiSink, NullSink
 from .sources import SourceError, camera_features, replay_features, synthetic_features
@@ -64,6 +66,164 @@ def _audit(args, config: Config) -> AuditLog:
 
 def _printer(record: dict) -> None:
     print("  " + render_record(record))
+
+
+def build_confirmer(args):
+    """Only an explicit --confirm puts a person in the loop.
+
+    The config says which actions are medium risk; the flag says a person is
+    present to answer. Requiring both means a config copied from somewhere else
+    cannot start interrogating an empty room, and a forgotten flag declines the
+    command instead of publishing it.
+    """
+    return StdinConfirmer() if getattr(args, "confirm", False) else None
+
+
+def _countdown(seconds: int = 3) -> None:
+    for i in range(seconds, 0, -1):
+        print(f"  {i}...", end="\r", flush=True)
+        time.sleep(1)
+    print("      ", end="\r", flush=True)
+
+
+def _camera_source(config, args, duration_s: float):
+    cam = config.camera
+    return camera_features(
+        camera_index=int(
+            args.camera if getattr(args, "camera", None) is not None else cam.get("index", 0)
+        ),
+        width=int(cam.get("width", 640)),
+        height=int(cam.get("height", 480)),
+        duration_s=duration_s,
+        show=getattr(args, "show", False),
+    )
+
+
+_MEASUREMENT_LABELS = {
+    "rest_median_deg": ("rest, median", "deg"),
+    "rest_band_deg": ("rest, 95% band", "deg"),
+    "rest_noise_deg": ("rest, noise", "deg"),
+    "hold_deg": ("movement held", "deg above rest"),
+    "rest_ear_median": ("open-eye EAR", ""),
+    "rest_ear_noise": ("EAR noise", ""),
+    "move_ear_median": ("EAR while closed", ""),
+    "hold_closure": ("closure while held", "of baseline"),
+    "samples_rest": ("rest frames", ""),
+    "samples_move": ("movement frames", ""),
+}
+
+
+def cmd_calibrate(args) -> int:
+    started = time.perf_counter()
+    config = _load(args)
+    name = args.action or (config.actions[0].name if config.actions else None)
+    if name is None:
+        raise ConfigError("no action in this config to calibrate")
+
+    scorer = next(a.scorer for a in config.actions if a.name == name)
+    origin = "a scripted session" if args.source == "synthetic" else "the camera"
+    print(f"fitting `{name}` ({scorer}) from {origin}")
+
+    if args.source == "synthetic":
+        print("no camera, no model: this exercises the fit and the verification, not a person")
+        rest = list(synthetic_features(script=(("idle", args.rest),), fps=30.0, seed=args.seed))
+        phase = "blink" if scorer == "blink" else "tilt"
+        move = list(synthetic_features(script=((phase, args.move),), fps=30.0, seed=args.seed + 1))
+    else:
+        print()
+        print("  step 1  sit as you normally would. Head resting naturally, face the camera.")
+        print(f"          recording {args.rest:.0f}s of rest -- do not perform the movement yet")
+        _countdown()
+        rest = list(_camera_source(config, args, args.rest))
+        print(f"          {len(rest)} frames")
+        print()
+        print(f"  step 2  now perform the movement and keep holding it for {args.move:.0f}s")
+        _countdown()
+        move = list(_camera_source(config, args, args.move))
+        print(f"          {len(move)} frames")
+
+    if len(rest) < 10 or len(move) < 10:
+        raise SourceError(
+            "not enough usable frames. Was a face visible the whole time? "
+            "Try a brighter room or a smaller distance to the camera."
+        )
+
+    suggestion = fit(config, name, rest, move)
+
+    print()
+    print("measured")
+    for key, (label, unit) in _MEASUREMENT_LABELS.items():
+        if key in suggestion.measurements:
+            unit_txt = f" {unit}" if unit else ""
+            print(f"  {label:<20}{suggestion.measurements[key]}{unit_txt}")
+
+    action = next(a for a in config.actions if a.name == name)
+    print()
+    print("thresholds")
+    print(f"  {'':<20}{'current':>10}{'fitted':>10}")
+    for key, value in suggestion.params.items():
+        old = action.scorer_params.get(key, "-")
+        print(f"  {key:<20}{str(old):>10}{str(value):>10}")
+
+    print()
+    print(f"verdict              {suggestion.verdict}")
+    for note in suggestion.notes:
+        print(f"  {note}")
+
+    if suggestion.verdict != NOT_SEPARABLE:
+        ok, dwell = verify(config, name, suggestion.params, rest, move)
+        if ok:
+            print(f"verified             a command fired after {dwell} ms of holding")
+        else:
+            print("verified             FAILED: the recorded movement does not fire under these")
+            print("                     thresholds. Do not adopt them.")
+            suggestion.verdict = NOT_SEPARABLE
+    else:
+        ok = False
+        print("not verified         thresholds were not written")
+
+    out = Path(args.out) if args.out else Path(
+        (args.config or "configs/example.yaml").replace(".yaml", "") + ".calibrated.yaml"
+    )
+    if suggestion.verdict != NOT_SEPARABLE:
+        written = write_config(
+            config, name, suggestion.params, out, args.config if args.config else None
+        )
+        print(f"wrote                {written}")
+
+    elapsed = time.perf_counter() - started
+    print()
+    if args.source == "synthetic":
+        print(
+            f"re-calibration time  {elapsed:.1f} s from a scripted source,"
+            " which is not a measurement"
+        )
+        print("                     run it against the camera for the number that counts")
+    else:
+        print(f"re-calibration time  {elapsed:.1f} s (command start to a verified configuration)")
+    if suggestion.verdict == NOT_SEPARABLE:
+        print("                     this movement cannot be separated from rest -- try a larger")
+        print("                     movement, a different direction, or a different body part")
+        return 3
+    return 0
+
+
+def cmd_review(args) -> int:
+    from .review import review
+
+    if not sys.stdin or not sys.stdin.isatty():
+        print(
+            "`ito review` asks one question per command, so it needs a real terminal.\n"
+            "Run it on the machine that holds the log, with the user or their carer present.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        review(Path(args.file))
+    except KeyboardInterrupt:
+        print("\nstopped early; nothing was written")
+        return 130
+    return 0
 
 
 def cmd_demo(args) -> int:
@@ -112,11 +272,25 @@ def cmd_run(args) -> int:
         duration_s=args.duration,
         show=args.show,
     )
-    pipe = Pipeline(config, _make_sink(args, config), _audit(args, config), on_event=_printer)
+    pipe = Pipeline(
+        config,
+        _make_sink(args, config),
+        _audit(args, config),
+        confirmer=build_confirmer(args),
+        on_event=_printer,
+    )
     print(
         f"intent-to-object {__version__}  |  actions: "
         f"{', '.join(a.name for a in config.actions)}  |  ctrl-c to stop"
     )
+    medium = [a.name for a in config.actions if a.risk == "medium"]
+    if medium:
+        state = (
+            "confirmation prompts are ON"
+            if args.confirm
+            else "they will be declined (add --confirm)"
+        )
+        print(f"medium-risk actions: {', '.join(medium)} -- {state}")
     if args.mqtt:
         print(f"publishing to {config.mqtt.get('host')}:{config.mqtt.get('port')}")
     else:
@@ -190,7 +364,7 @@ def cmd_explain(args) -> int:
 
 def cmd_doctor(args) -> int:
     ok = True
-    config: Optional[Config] = None
+    config: Config | None = None
     print(f"intent-to-object {__version__}")
     print(f"python           {platform.python_version()} ({platform.system()})")
     try:
@@ -224,7 +398,10 @@ def cmd_doctor(args) -> int:
             print("                 this build has no 'solutions' API; pin mediapipe<0.11")
             ok = False
         if py >= (3, 13):
-            print(f"                 warning: mediapipe rarely ships wheels for {py.major}.{py.minor}")
+            print(
+                "                 warning: mediapipe rarely ships wheels for "
+                f"{py.major}.{py.minor}"
+            )
     except ImportError:
         print("mediapipe        missing (needed for camera) -- pip install '.[camera]'")
         print("                 note: mediapipe has no wheels for Python 3.13+; use 3.10-3.12")
@@ -315,17 +492,25 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     def common(p, config_required=False):
-        p.add_argument("-c", "--config", help="path to a YAML config (default: built-in single action)")
+        p.add_argument(
+            "-c", "--config", help="path to a YAML config (default: built-in single action)"
+        )
         p.add_argument("--audit", help="write the decision log here")
         p.add_argument("--no-audit", action="store_true", help="do not write a decision log")
-        p.add_argument("--mqtt", action="store_true", help="publish to the MQTT broker in the config")
-        p.add_argument("-q", "--quiet", action="store_true", help="do not echo intents to the terminal")
+        p.add_argument(
+            "--mqtt", action="store_true", help="publish to the MQTT broker in the config"
+        )
+        p.add_argument(
+            "-q", "--quiet", action="store_true", help="do not echo intents to the terminal"
+        )
 
     p = sub.add_parser("demo", help="run the full chain on a scripted session (no camera)")
     common(p)
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--fps", type=float, default=30.0)
-    p.add_argument("--duration", type=float, default=None, help="stop after N seconds of session time")
+    p.add_argument(
+        "--duration", type=float, default=None, help="stop after N seconds of session time"
+    )
     p.set_defaults(func=cmd_demo)
 
     p = sub.add_parser("run", help="live: camera -> intent -> MQTT")
@@ -333,7 +518,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--camera", type=int, default=None, help="camera index (default from config)")
     p.add_argument("--duration", type=float, default=None)
     p.add_argument("--show", action="store_true", help="show the camera window")
+    p.add_argument(
+        "--confirm",
+        action="store_true",
+        help="ask a human before publishing medium-risk actions (without this they are declined)",
+    )
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("calibrate", help="fit thresholds to this person in about 20 seconds")
+    p.add_argument("-c", "--config")
+    p.add_argument("-o", "--out", help="where to write the fitted config")
+    p.add_argument("--action", help="which action to fit (default: the first)")
+    p.add_argument("--source", choices=["camera", "synthetic"], default="camera")
+    p.add_argument("--rest", type=float, default=8.0, help="seconds of resting posture")
+    p.add_argument("--move", type=float, default=6.0, help="seconds of holding the movement")
+    p.add_argument("--camera", type=int, default=None)
+    p.add_argument("--seed", type=int, default=7, help="only with --source synthetic")
+    p.set_defaults(func=cmd_calibrate)
+
+    p = sub.add_parser("review", help="mark each command as intended, and get a rate per hour")
+    p.add_argument("file")
+    p.set_defaults(func=cmd_review)
 
     p = sub.add_parser("replay", help="re-run a recorded session through the current config")
     common(p)
@@ -367,7 +572,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -38,7 +38,7 @@ _ACTION_KEYS = {"name", "scorer", "scorer_params", "gate", "risk", "topic", "pay
 class ActionConfig:
     name: str
     scorer: str
-    scorer_params: Dict[str, Any] = field(default_factory=dict)
+    scorer_params: dict[str, Any] = field(default_factory=dict)
     gate: GateConfig = field(default_factory=GateConfig)
     risk: str = "low"
     topic: str = "ito/intent"
@@ -47,21 +47,21 @@ class ActionConfig:
 
 @dataclass
 class Config:
-    camera: Dict[str, Any] = field(
+    camera: dict[str, Any] = field(
         default_factory=lambda: {"index": 0, "width": 640, "height": 480}
     )
-    perception: Dict[str, Any] = field(
+    perception: dict[str, Any] = field(
         default_factory=lambda: {"baseline_window_s": 20.0, "baseline_min_samples": 15}
     )
-    mqtt: Dict[str, Any] = field(
+    mqtt: dict[str, Any] = field(
         default_factory=lambda: {"host": "localhost", "port": 1883, "qos": 0, "retain": False}
     )
-    policy: Dict[str, Any] = field(
-        default_factory=lambda: {"rate_limit_per_min": 20, "allow_medium": False}
+    policy: dict[str, Any] = field(
+        default_factory=lambda: {"rate_limit_per_min": 20}
     )
-    output: Dict[str, Any] = field(default_factory=lambda: {"audit_path": "logs/audit.jsonl"})
-    actions: List[ActionConfig] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    output: dict[str, Any] = field(default_factory=lambda: {"audit_path": "logs/audit.jsonl"})
+    actions: list[ActionConfig] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def validate(self) -> None:
         if not self.actions:
@@ -119,17 +119,20 @@ class Config:
                     f"{action.name}: cooldown_ms is short relative to dwell_ms; "
                     "a held posture may re-fire quickly"
                 )
-        if self.policy.get("allow_medium") and not self.actions:
-            self.warnings.append("allow_medium is set but no medium-risk action exists")
+            if action.risk == "medium":
+                self.warnings.append(
+                    f"{action.name}: medium risk -- it publishes only when `ito run` is "
+                    "given --confirm, so a person is present to answer"
+                )
 
 
-def _check_keys(obj: Dict[str, Any], allowed: set, where: str) -> None:
+def _check_keys(obj: dict[str, Any], allowed: set, where: str) -> None:
     unknown = set(obj) - allowed
     if unknown:
         raise ConfigError(f"{where}: unknown key(s) {sorted(unknown)}; allowed: {sorted(allowed)}")
 
 
-def from_dict(raw: Dict[str, Any]) -> Config:
+def from_dict(raw: dict[str, Any]) -> Config:
     if not isinstance(raw, dict):
         raise ConfigError("config root must be a mapping")
     _check_keys(raw, _TOP_KEYS, "config")
@@ -169,6 +172,12 @@ def from_dict(raw: Dict[str, Any]) -> Config:
         output=dict(raw.get("output") or {}),
         actions=actions,
     )
+    if "allow_medium" in cfg.policy:
+        raise ConfigError(
+            "policy.allow_medium was removed: whether a human is present is now stated on "
+            "the command line (`ito run --confirm`), not in the config. Delete the key."
+        )
+    _check_keys(cfg.policy, {"rate_limit_per_min"}, "policy")
     default = Config()
     for key in ("camera", "perception", "mqtt", "policy", "output"):
         merged = getattr(default, key).copy()
@@ -178,7 +187,7 @@ def from_dict(raw: Dict[str, Any]) -> Config:
     return cfg
 
 
-def load(path: Optional[Path]) -> Config:
+def load(path: Path | None) -> Config:
     if path is None:
         return from_dict(default_dict())
     path = Path(path)
@@ -189,7 +198,7 @@ def load(path: Optional[Path]) -> Config:
     return from_dict(raw)
 
 
-def default_dict() -> Dict[str, Any]:
+def default_dict() -> dict[str, Any]:
     """The config used by ``ito demo`` and written by ``ito config init``.
 
     One movement, one action. Adding a second action before the first one is
@@ -199,7 +208,7 @@ def default_dict() -> Dict[str, Any]:
         "camera": {"index": 0, "width": 640, "height": 480},
         "perception": {"baseline_window_s": 20.0, "baseline_min_samples": 15},
         "mqtt": {"host": "localhost", "port": 1883, "qos": 0, "retain": False},
-        "policy": {"rate_limit_per_min": 20, "allow_medium": False},
+        "policy": {"rate_limit_per_min": 20},
         "output": {"audit_path": "logs/audit.jsonl"},
         "actions": [
             {

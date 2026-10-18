@@ -15,7 +15,6 @@ movement the thresholds are only half-reading.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from .types import Fire
 
@@ -48,11 +47,11 @@ class Gate:
         self.state = IDLE
         self.cancelled = 0
         self.fired = 0
-        self._t_on: Optional[int] = None
-        self._t_release: Optional[int] = None
+        self._t_on: int | None = None
+        self._t_release: int | None = None
         self._last_fire: int = 0
 
-    def update(self, t_ms: int, score: float) -> Optional[Fire]:
+    def update(self, t_ms: int, score: float) -> Fire | None:
         cfg = self.config
 
         if self.state == IDLE:

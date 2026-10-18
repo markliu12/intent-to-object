@@ -13,11 +13,9 @@ the only one you need to touch.
 from __future__ import annotations
 
 import json
-import math
 import time
-from dataclasses import replace
+from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import Iterator, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -34,7 +32,7 @@ def _t(seconds: float) -> int:
 
 
 def synthetic_features(
-    script: Optional[Sequence[Tuple[str, float]]] = None,
+    script: Sequence[tuple[str, float]] | None = None,
     fps: float = 30.0,
     seed: int = 7,
 ) -> Iterator[Features]:
@@ -186,8 +184,8 @@ def camera_features(
     camera_index: int = 0,
     width: int = 640,
     height: int = 480,
-    duration_s: Optional[float] = None,
-    landmarks_out: Optional[Path] = None,
+    duration_s: float | None = None,
+    landmarks_out: Path | None = None,
     show: bool = False,
 ) -> Iterator[Features]:
     """Live features from a webcam. The only place MediaPipe is imported."""
@@ -210,6 +208,9 @@ def camera_features(
             ok, frame = cap.read()
             if not ok:
                 break
+            # Stamp the frame the moment it exists: everything after this is
+            # latency this project is responsible for.
+            captured_at = time.perf_counter()
             rgb = cv2.cvtColor(cv2.flip(frame, 1), cv2.COLOR_BGR2RGB)
             result = mesh.process(rgb)
             t_ms = _t(elapsed)
@@ -227,7 +228,7 @@ def camera_features(
                     )
                     + "\n"
                 )
-            yield extract_features(pts, t_ms=t_ms, aspect=aspect)
+            yield extract_features(pts, t_ms=t_ms, aspect=aspect, captured_at=captured_at)
             if show:
                 cv2.imshow("intent-to-object", frame)
                 if cv2.waitKey(1) & 0xFF == 27:
@@ -247,7 +248,7 @@ def record_landmarks(
     camera_index: int = 0,
     width: int = 640,
     height: int = 480,
-) -> Tuple[int, float]:
+) -> tuple[int, float]:
     """Record a session for later replay. Returns (frames, effective_fps)."""
     frames = 0
     first = last = None
@@ -265,12 +266,3 @@ def record_landmarks(
     if frames > 1 and first is not None and last is not None and last > first:
         fps = (frames - 1) * 1000.0 / (last - first)
     return frames, fps
-
-
-def with_baseline(features: Features, baseline: float) -> Features:
-    return replace(features, ear_baseline=baseline)
-
-
-def angular_distance(a: float, b: float) -> float:
-    d = math.fmod(a - b, 360.0)
-    return abs(d)

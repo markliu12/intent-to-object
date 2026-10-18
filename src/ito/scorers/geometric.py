@@ -15,7 +15,6 @@ these numbers rather than assumed to beat them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Type
 
 from ..geometry import ramp
 from ..types import Features
@@ -76,7 +75,7 @@ class BlinkScorer:
         return ramp(closure, self.start_ratio, self.full_ratio)
 
 
-REGISTRY: Dict[str, Type] = {
+REGISTRY: dict[str, type] = {
     "tilt": TiltScorer,
     "blink": BlinkScorer,
 }

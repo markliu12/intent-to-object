@@ -8,7 +8,7 @@ matcher drop in here without touching the gate or the policy layer.
 
 from __future__ import annotations
 
-from typing import Dict, Protocol, Type, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from ..types import Features
 
@@ -21,7 +21,7 @@ class Scorer(Protocol):
         ...
 
 
-def build_scorer(kind: str, params: Dict | None = None) -> Scorer:
+def build_scorer(kind: str, params: dict | None = None) -> Scorer:
     """Instantiate a scorer by name, rejecting unknown parameters.
 
     Rejecting unknown keys matters: a silent typo in ``dwell_ms`` (or
@@ -32,7 +32,7 @@ def build_scorer(kind: str, params: Dict | None = None) -> Scorer:
 
     if kind not in REGISTRY:
         raise KeyError(f"unknown scorer {kind!r}; available: {sorted(REGISTRY)}")
-    cls: Type = REGISTRY[kind]
+    cls: type = REGISTRY[kind]
     params = dict(params or {})
     allowed = set(getattr(cls, "__annotations__", {}))
     unknown = set(params) - allowed

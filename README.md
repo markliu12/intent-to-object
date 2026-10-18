@@ -12,15 +12,16 @@ Nothing leaves the machine. No account, no subscription, no cloud.
 
 ---
 
-## Status: v0.1, working end to end
+## Status: v0.2, working end to end, and it measures itself
 
 | | |
 |---|---|
 | Perception | MediaPipe Face Mesh (478 landmarks), CPU, no GPU |
 | Intent | geometric baseline: head roll, eye-aspect ratio, both with a dwell gate |
 | Output | MQTT publish, or console only |
-| Calibration | none required; adapts a rolling open-eye baseline; thresholds are one config edit |
-| Platforms | Python 3.9+ for the core; Python 3.10–3.12 for the camera |
+| Calibration | `ito calibrate` fits thresholds from 20 seconds of movement, and refuses when the movement is not separable from rest |
+| Measurement | latency, false triggers per hour, and re-calibration time are produced by the tool, not estimated by hand |
+| Platforms | Python 3.10+ for the core; Python 3.10–3.12 for the camera |
 | Users tested | **zero.** There are no human-subject numbers in this repository yet |
 
 What is deliberately *not* here: multiple simultaneous gestures, a trained classifier, mobile app, nurses' station, or any support for locks, gas, beds and nurse-call. See [docs/safety.md](docs/safety.md).
@@ -35,7 +36,7 @@ ito demo
 ```
 
 ```text
-intent-to-object 0.1.0  |  scripted session, 1 action(s): tilt_left
+intent-to-object 0.2.0  |  scripted session, 1 action(s): tilt_left
 (no camera, no model -- this exercises the gate/policy/publish chain only)
 
   -> ito/intent/tilt_left  {"intent":"tilt_left","confidence":1.0,"held_ms":467,"ts_ms":3667,...}
@@ -50,6 +51,20 @@ dwells cancelled  1  (movement started, released too early)
 ```
 
 That session is generated, not recorded. It exists so you can watch a command travel the whole chain on your first run, and so CI catches a regression in the chain — **it is not evidence that anything works on a person**, and the report says so every time.
+
+## The three metrics, as commands
+
+The project is judged on three numbers, so the tooling produces all three and states which ones it cannot.
+
+```bash
+ito calibrate                 # 20 s: fit thresholds, verify they fire, report re-calibration time
+ito run --mqtt                # live; the session summary carries frame->publish latency
+ito review logs/audit.jsonl   # mark each command intended/unintended -> false triggers per hour
+```
+
+`calibrate` will **not** write thresholds when the movement cannot be separated from resting sway. That refusal is the point: a quietly written bad threshold is worse than no threshold, because nobody finds out until it misfires at 3 a.m.
+
+`review` needs a person to answer one question per command. It computes the rate against the exposure recorded in the session, because a count without a denominator is not a measurement. Protocols for running this properly are in [docs/metrics.md](docs/metrics.md) — including what still has to be measured by hand: the interval between the movement itself and a frame, which is the camera's, not this project's.
 
 ## With a camera
 
@@ -67,7 +82,8 @@ ito run --show        # dry run: prints and logs intents, publishes nothing
 ## With a real object
 
 ```bash
-ito run --mqtt        # publish to the broker in your config
+ito run --mqtt                  # publish to the broker in your config
+ito run --mqtt --confirm        # also ask a human before any medium-risk action
 ```
 
 Any MQTT subscriber is a valid output. A common one:
@@ -107,9 +123,9 @@ The gap is not perception (Project Gameface and others proved "head movement to 
 
 ## The three metrics this project is judged on
 
-1. **End-to-end latency** — movement onset to MQTT PUBACK.
+1. **End-to-end latency** — movement onset to MQTT PUBACK. The software's share of it is measured by every run; the movement-to-frame share is the camera's.
 2. **False-trigger rate** — commands per hour of defined activity, reported next to the movement amplitude it demanded.
-3. **Re-calibration time** — seconds from "my movement is different today" to a working new threshold, target ≤ 30 s.
+3. **Re-calibration time** — seconds from "my movement is different today" to a verified working threshold, target ≤ 30 s.
 
 Protocols, denominators and a reporting template are in [docs/metrics.md](docs/metrics.md). None of the three has been measured on a user yet; that is the next milestone, and it is stated as an absence rather than a claim.
 
@@ -120,6 +136,7 @@ Protocols, denominators and a reporting template are in [docs/metrics.md](docs/m
 - [docs/metrics.md](docs/metrics.md) — how to measure the three numbers honestly
 - [docs/hardware.md](docs/hardware.md) — MQTT contract, wiring an ESP32, what it costs
 - [GOVERNANCE.md](GOVERNANCE.md) — how this survives its first maintainer
+- [CHANGELOG.md](CHANGELOG.md) — what changed, and why
 - [README.zh-CN.md](README.zh-CN.md) — 中文说明
 
 ## Layout
@@ -130,12 +147,14 @@ src/ito/
   scorers/       Scorer protocol + geometric baseline (tilt, blink)
   gate.py        dwell / hysteresis / release state machine
   policy.py      risk tiers, confirmation, rate limit
-  pipeline.py    wiring; the only place that knows about all of the above
+  pipeline.py    wiring, timing and the session record
+  calibrate.py   guided re-fit, and its own verification
+  review.py      intended/unintended marking -> false triggers per hour
   sources.py     camera, replay, scripted -- the only file that imports MediaPipe
   sinks.py       console, MQTT, payload templating
   audit.py       decision log + human-readable rendering
   report.py      session summary
-  cli.py         doctor / demo / run / record / replay / explain / config / selftest
+  cli.py         doctor / demo / run / calibrate / review / record / replay / explain / config / selftest
 ```
 
 Only `sources.py` touches MediaPipe and only `sinks.py` touches paho, which is why `pytest` runs green on a machine with no camera and no broker.

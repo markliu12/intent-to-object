@@ -18,7 +18,7 @@ Two coordinate decisions matter and are easy to get wrong:
 from __future__ import annotations
 
 import math
-from typing import Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -53,7 +53,7 @@ def _eye_aspect_ratio(xy: np.ndarray, idx: Sequence[int]) -> float:
     return vertical / (2.0 * horizontal)
 
 
-def canonicalize(xy: np.ndarray) -> Tuple[np.ndarray, dict]:
+def canonicalize(xy: np.ndarray) -> tuple[np.ndarray, dict]:
     """Remove translation, scale and in-plane rotation from landmarks.
 
     Returns points in a canonical frame where the eye centres sit at
@@ -67,8 +67,8 @@ def canonicalize(xy: np.ndarray) -> Tuple[np.ndarray, dict]:
     approximate. Full 3D normalisation via PnP is a later-phase upgrade.
     """
     r = xy[list(RIGHT_EYE_CORNERS)].mean(axis=0)
-    l = xy[list(LEFT_EYE_CORNERS)].mean(axis=0)
-    v = l - r
+    left_c = xy[list(LEFT_EYE_CORNERS)].mean(axis=0)
+    v = left_c - r
     dist = float(np.linalg.norm(v))
     if dist < _EPS:
         raise ValueError("degenerate eye corners: cannot establish a canonical frame")
@@ -76,7 +76,7 @@ def canonicalize(xy: np.ndarray) -> Tuple[np.ndarray, dict]:
     scale = 1.0 / dist
     ca, sa = math.cos(-angle), math.sin(-angle)
     rot = np.array([[ca, -sa], [sa, ca]], dtype=float)
-    mid = (l + r) / 2.0
+    mid = (left_c + r) / 2.0
     out = (xy - mid) @ rot.T * scale
     return out, {"angle_rad": angle, "scale": scale, "origin": mid.tolist()}
 
@@ -95,6 +95,7 @@ def extract_features(
     t_ms: int = 0,
     aspect: float = DEFAULT_ASPECT,
     ear_baseline: float = 0.0,
+    captured_at: float = 0.0,
 ) -> Features:
     """Reduce a landmark frame to the scalar features the scorers consume."""
     pts = np.asarray(landmarks, dtype=float)
@@ -139,6 +140,7 @@ def extract_features(
         ear=ear,
         brow_raise=brow_raise,
         ear_baseline=ear_baseline,
+        captured_at=captured_at,
     )
 
 
@@ -164,7 +166,7 @@ def ramp(value: float, start: float, full: float) -> float:
     return float(min(1.0, max(0.0, (value - start) / (full - start))))
 
 
-def suggest_thresholds(samples: Sequence[float], k: float = 4.0) -> Optional[Tuple[float, float]]:
+def suggest_thresholds(samples: Sequence[float], k: float = 4.0) -> tuple[float, float] | None:
     """Turn a quiet baseline sample into (start, full) thresholds.
 
     ``start`` is placed a few standard deviations above the resting level so a

@@ -9,8 +9,6 @@ measurement.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 
 from .config import Config
@@ -25,10 +23,10 @@ def _pct(values, q: float) -> float:
 
 def format_summary(
     stats: SessionStats,
-    config: Optional[Config] = None,
+    config: Config | None = None,
     *,
     label: str = "session",
-    fps: Optional[float] = None,
+    fps: float | None = None,
 ) -> str:
     lines = []
     duration = stats.uptime_s()
@@ -44,7 +42,10 @@ def format_summary(
     lines.append(f"gates fired       {stats.fired}")
     lines.append(f"published         {stats.published}")
     lines.append(f"blocked by policy {stats.blocked}")
-    lines.append(f"dwells cancelled  {stats.cancelled_dwells}  (movement started, released too early)")
+    lines.append(
+        f"dwells cancelled  {stats.cancelled_dwells}"
+        "  (movement started, released too early)"
+    )
 
     if hours > 0:
         if duration >= 60:
@@ -67,6 +68,25 @@ def format_summary(
             f"hold time         median {np.median(d):.0f} ms"
             f"   p90 {_pct(d, 90):.0f} ms   max {d.max():.0f} ms"
         )
+    if stats.frame_to_publish_ms:
+        lat = np.asarray(stats.frame_to_publish_ms, dtype=float)
+        lines.append(
+            f"frame->publish    median {np.median(lat):.1f} ms"
+            f"   p90 {_pct(lat, 90):.1f} ms   n={lat.size}"
+        )
+        if stats.decision_us and stats.publish_us:
+            decision = np.median(np.asarray(stats.decision_us)) / 1000.0
+            publish = np.median(np.asarray(stats.publish_us)) / 1000.0
+            lines.append(
+                f"  of which        scoring+gate {decision:.2f} ms, publish {publish:.2f} ms,"
+                " rest is landmark extraction"
+            )
+        lines.append(
+            "                  this is software latency only: the time from the movement"
+            " itself to a frame is set by the camera interval"
+        )
+    else:
+        lines.append("frame->publish    not measurable: this source has no camera timestamp")
     if stats.baseline_max > 0:
         lines.append(
             f"ear baseline      {stats.baseline_min:.3f} .. {stats.baseline_max:.3f}"

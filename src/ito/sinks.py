@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import re
 import sys
-from typing import Any, Dict, Protocol
+from typing import Any, Protocol
 
 _PLACEHOLDER = re.compile(r"\$\{(\w+)\}")
 
 
-def render_payload(template: str, context: Dict[str, Any]) -> str:
+def render_payload(template: str, context: dict[str, Any]) -> str:
     """Substitute ``${name}`` placeholders.
 
     Deliberately not ``str.format``: payloads are usually JSON, and JSON is full

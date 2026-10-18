@@ -14,6 +14,9 @@ perception:
   # rolling window used to learn this person's open-eye value
   baseline_window_s: 20.0
   baseline_min_samples: 15
+  # a gap this long between usable frames is reported as "face lost": silence is
+  # the one failure of this system that is otherwise invisible
+  face_lost_warn_s: 3.0
 
 mqtt:
   host: localhost
@@ -48,6 +51,8 @@ actions:
       "off": 0.35            # hysteretic release
       dwell_ms: 450          # must be held this long; 450 excludes most blinks
       cooldown_ms: 1800      # and must be released before it can fire again
+      release_ms: 150        # ...and "released" means below `off` for this long,
+                             # not one noisy frame, or a held posture re-fires
     risk: low
     topic: ito/intent/tilt_left
     payload: '{"intent":"${action}","confidence":${score},"held_ms":${dwell_ms},"ts_ms":${t_ms},"source":"intent-to-object"}'
@@ -65,5 +70,6 @@ actions:
   #     off: 0.35
   #     dwell_ms: 700
   #     cooldown_ms: 2500
+  #     release_ms: 150
   #   risk: medium          # medium = someone must confirm each send
   #   topic: ito/intent/hold_blink

@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 from ito.audit import AuditLog
 from ito.config import load
@@ -53,3 +54,33 @@ def test_replay_of_recorded_features_matches_the_live_run(tmp_path):
     replayed = Pipeline(load(None), NullSink(), AuditLog(None)).run(replay_features(path))
     assert live.published == replayed.published
     assert live.frames == replayed.frames
+
+
+def test_a_gap_in_the_frame_stream_is_recorded_as_face_lost():
+    """Silence is the failure this system cannot see: a source that yields
+    nothing looks exactly like a source that is working, from the outside."""
+    frames = list(synthetic_features(script=(("idle", 2.0),), fps=30.0, seed=1))
+    tail = [
+        replace(f, t_ms=f.t_ms + 10_000)
+        for f in synthetic_features(script=(("idle", 2.0),), fps=30.0, seed=1)
+    ]
+    warnings = []
+    pipe = Pipeline(load(None), NullSink(), AuditLog(None), on_warning=warnings.append)
+    pipe.run(iter(frames + tail))
+
+    assert pipe.stats.face_gaps == 1
+    assert pipe.stats.max_gap_ms >= 5_000
+    assert warnings and "no usable frame" in warnings[0]
+
+
+def test_a_normally_paced_session_reports_no_face_loss():
+    stats = Pipeline(load(None), NullSink(), AuditLog(None)).run(
+        synthetic_features(script=(("idle", 3.0),), fps=30.0, seed=1)
+    )
+    assert stats.face_gaps == 0
+    assert stats.max_gap_ms == 0
+
+
+def test_a_sink_that_cannot_confirm_delivery_does_not_claim_to():
+    pipe = Pipeline(load(None), NullSink(), AuditLog(None))
+    assert pipe.stats.publish_acked is False

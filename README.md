@@ -12,15 +12,15 @@ Nothing leaves the machine. No account, no subscription, no cloud.
 
 ---
 
-## Status: v0.2, working end to end, and it measures itself
+## Status: v0.2.1, working end to end, and it measures itself
 
 | | |
 |---|---|
 | Perception | MediaPipe Face Mesh (478 landmarks), CPU, no GPU |
 | Intent | geometric baseline: head roll, eye-aspect ratio, both with a dwell gate |
 | Output | MQTT publish, or console only |
-| Calibration | `ito calibrate` fits thresholds from 20 seconds of movement, and refuses when the movement is not separable from rest |
-| Measurement | latency, false triggers per hour, and re-calibration time are produced by the tool, not estimated by hand |
+| Calibration | `ito calibrate` fits thresholds from 20 seconds of movement, lowers the dwell to what you can actually hold, and refuses when the movement is not separable from rest |
+| Measurement | latency, false triggers per hour, missed commands, and re-calibration time are produced by the tool, not estimated by hand |
 | Platforms | Python 3.10+ for the core; Python 3.10–3.12 for the camera |
 | Users tested | **zero.** There are no human-subject numbers in this repository yet |
 
@@ -36,7 +36,7 @@ ito demo
 ```
 
 ```text
-intent-to-object 0.2.0  |  scripted session, 1 action(s): tilt_left
+intent-to-object 0.2.1  |  scripted session, 1 action(s): tilt_left
 (no camera, no model -- this exercises the gate/policy/publish chain only)
 
   -> ito/intent/tilt_left  {"intent":"tilt_left","confidence":1.0,"held_ms":467,"ts_ms":3667,...}
@@ -57,14 +57,14 @@ That session is generated, not recorded. It exists so you can watch a command tr
 The project is judged on three numbers, so the tooling produces all three and states which ones it cannot.
 
 ```bash
-ito calibrate                 # 20 s: fit thresholds, verify they fire, report re-calibration time
-ito run --mqtt                # live; the session summary carries frame->publish latency
-ito review logs/audit.jsonl   # mark each command intended/unintended -> false triggers per hour
+ito calibrate                 # 20 s: fit thresholds, lower the dwell to what you can hold, verify
+ito run --mqtt                # live; the summary carries frame->enqueue (qos 0) or frame->PUBACK (qos 1)
+ito review logs/audit.jsonl   # mark each command intended/unintended, count the misses -> two rates
 ```
 
-`calibrate` will **not** write thresholds when the movement cannot be separated from resting sway. That refusal is the point: a quietly written bad threshold is worse than no threshold, because nobody finds out until it misfires at 3 a.m.
+`calibrate` will **not** write thresholds when the movement cannot be separated from resting sway. That refusal is the point: a quietly written bad threshold is worse than no threshold, because nobody finds out until it misfires at 3 a.m. It also lowers the dwell when the measured hold cannot fill the configured one — a threshold you can reach but cannot hold is the same failure wearing a better disguise. And it keeps the session it measured (`--session`, on by default for the camera), so a later threshold change can be checked with `ito replay` instead of asking the person to perform the movement again.
 
-`review` needs a person to answer one question per command. It computes the rate against the exposure recorded in the session, because a count without a denominator is not a measurement. Protocols for running this properly are in [docs/metrics.md](docs/metrics.md) — including what still has to be measured by hand: the interval between the movement itself and a frame, which is the camera's, not this project's.
+`review` needs a person to answer one question per command, plus one question for the whole session: how many times did you make the movement and nothing happened. It computes both rates against the exposure recorded in the session, because a count without a denominator is not a measurement — and because a false-trigger rate reported alone rewards a gate that has simply become too hard to satisfy. Protocols for running this properly are in [docs/metrics.md](docs/metrics.md), including what still has to be measured by hand: the interval between the movement itself and a frame, which is the camera's, not this project's.
 
 ## With a camera
 
@@ -115,7 +115,7 @@ The gap is not perception (Project Gameface and others proved "head movement to 
 
 **Geometric baseline before machine learning.** Head tilt is an angle; a held blink is eye-aspect ratio against a personal baseline. Two scalars, a deadband and a dwell timer handle both, and when they fail you can see why by looking at the camera. A few-shot prototype matcher is planned for people whose motion no threshold separates from their rest — it will be benchmarked against these numbers, not assumed to beat them. `ito.scorers.Scorer` is the seam where it plugs in.
 
-**A dwell gate, plus a release requirement.** Firing once and then refusing to fire again until the signal drops is what makes the thing usable by someone who cannot make a quick movement. Holding for four seconds produces one command, not twelve.
+**A dwell gate, plus a release requirement.** Firing once and then refusing to fire again until the signal drops is what makes the thing usable by someone who cannot make a quick movement. Holding for four seconds produces one command, not twelve — and "drops" means *stays below the release threshold for 150 ms*, because a held posture dips through that boundary by noise alone.
 
 **Risk tiers in the policy, not in the docs.** Low risk publishes. Medium risk asks a human first. High risk is refused when the config loads, with an explanation — so the refusal is impossible to miss and impossible to enable by typo.
 
@@ -123,7 +123,7 @@ The gap is not perception (Project Gameface and others proved "head movement to 
 
 ## The three metrics this project is judged on
 
-1. **End-to-end latency** — movement onset to MQTT PUBACK. The software's share of it is measured by every run; the movement-to-frame share is the camera's.
+1. **End-to-end latency** — movement onset to MQTT PUBACK. The software's share of it is measured by every run; the movement-to-frame share is the camera's. At qos 0 there is no PUBACK by protocol, so the tool reports frame→enqueue and labels it that way rather than quietly relabelling an enqueue as a delivery.
 2. **False-trigger rate** — commands per hour of defined activity, reported next to the movement amplitude it demanded.
 3. **Re-calibration time** — seconds from "my movement is different today" to a verified working threshold, target ≤ 30 s.
 

@@ -96,3 +96,27 @@ def test_unintended_verdict_constant_is_used(tmp_path):
     write_log(path, [command(1000), session(60.0)])
     report = review(path, ask=lambda r, i, n: False, log=lambda *a, **k: None)
     assert report["marks"][0]["verdict"] == UNINTENDED
+
+
+def test_missed_commands_are_reported_next_to_the_false_trigger_rate(tmp_path):
+    """A false-trigger rate on its own rewards a gate that is too hard."""
+    path = tmp_path / "audit.jsonl"
+    write_log(path, [command(1000), command(2000), session(3600.0)])
+    report = review(
+        path,
+        ask=lambda record, i, n: True,
+        log=lambda *a, **k: None,
+        ask_missed=lambda: 2,
+    )
+    assert report["missed"] == 2
+    assert report["attempts"] == 4
+    assert report["miss_rate_pct"] == 50.0
+    assert report["missed_per_hour"] == 2.0
+
+
+def test_missed_commands_are_unknown_rather_than_zero_when_nobody_was_asked(tmp_path):
+    path = tmp_path / "audit.jsonl"
+    write_log(path, [command(1000), session(60.0)])
+    report = review(path, ask=lambda record, i, n: True, log=lambda *a, **k: None)
+    assert report["missed"] is None
+    assert report["miss_rate_pct"] is None

@@ -162,7 +162,7 @@ def _face_mesh():
     except ImportError as exc:
         raise SourceError(
             "perception needs MediaPipe: pip install '.[camera]' "
-            "(Python 3.9-3.12; MediaPipe has no 3.13+ wheels yet)"
+            "(Python 3.10-3.12; MediaPipe has no 3.13+ wheels yet)"
         ) from exc
 
     solutions = getattr(mp, "solutions", None)
@@ -190,7 +190,6 @@ def camera_features(
     mesh = _face_mesh()
     aspect = width / float(height) if height else DEFAULT_ASPECT
     started = time.monotonic()
-    missing = 0
     out = None
     if landmarks_out:
         landmarks_out = Path(landmarks_out)
@@ -212,7 +211,9 @@ def camera_features(
             result = mesh.process(rgb)
             t_ms = _t(elapsed)
             if not result.multi_face_landmarks:
-                missing += 1
+                # Nothing is yielded, and the pipeline reads the resulting gap in
+                # t_ms as "no usable frame" -- counting it here as well used to
+                # produce a number nothing ever read.
                 continue
             pts = np.array(
                 [[p.x, p.y, p.z] for p in result.multi_face_landmarks[0].landmark],

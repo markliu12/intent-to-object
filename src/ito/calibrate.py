@@ -14,14 +14,15 @@ place to measure that is inside the tool that does it.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
 import yaml
 
 from .audit import AuditLog
-from .config import Config, ConfigError, default_dict
+from .config import ActionConfig, Config, ConfigError, default_dict
 from .pipeline import Pipeline
 from .sinks import NullSink
 from .types import Features
@@ -36,6 +37,7 @@ class Suggestion:
     action: str
     kind: str
     params: dict = field(default_factory=dict)
+    gate: dict = field(default_factory=dict)
     verdict: str = USABLE
     notes: list[str] = field(default_factory=list)
     measurements: dict = field(default_factory=dict)
@@ -59,6 +61,37 @@ def _robust(values) -> tuple[float, float]:
     if arr.size == 0:
         raise ValueError("no samples")
     return float(np.median(arr)), float(np.percentile(np.abs(arr - np.median(arr)), 95))
+
+
+def _longest_run_ms(frames: list[Features], above: list[bool]) -> float:
+    """Duration of the longest unbroken stretch where ``above`` is true.
+
+    This is "how long the person can actually hold this", as opposed to "how
+    long the recording was", and it is the number a dwell has to fit inside.
+    """
+    best = 0.0
+    start_t: int | None = None
+    last_t: int | None = None
+    for frame, hit in zip(frames, above, strict=True):
+        if hit:
+            if start_t is None:
+                start_t = frame.t_ms
+            last_t = frame.t_ms
+        elif start_t is not None:
+            best = max(best, float(last_t - start_t))
+            start_t = None
+    if start_t is not None and last_t is not None:
+        best = max(best, float(last_t - start_t))
+    return best
+
+
+def _signed_offset(values, direction: str):
+    """Project roll offsets onto the configured direction, signed by "toward intent"."""
+    if direction == "left":
+        return values
+    if direction == "right":
+        return -values
+    return np.abs(values)
 
 
 def fit_tilt(rest: list[Features], move: list[Features], direction: str = "any") -> Suggestion:
@@ -92,12 +125,20 @@ def fit_tilt(rest: list[Features], move: list[Features], direction: str = "any")
         )
         return s
 
-    hold = float(np.percentile(offset, 60))
+    # p90, not the median: this is "the best this movement gets", not "what it
+    # sustains most of the time". Somebody who can reach 14 degrees and hold it
+    # for 600 ms inside a six-second capture is exactly who this is for, and a
+    # median would read their movement as indistinguishable from rest and refuse
+    # them -- the opposite of useful. How long they can hold it is measured
+    # separately, below, and is what the dwell has to fit inside.
+    hold = float(np.percentile(offset, 90))
     start = round(max(2.0, rest_band + 2.0 * noise), 1)
     full = round(max(start + 2.0, min(hold, start + 12.0)), 1)
 
+    signed = _signed_offset(move_roll - neutral, direction)
     s.params = {"neutral_deg": round(neutral, 1), "start_deg": start, "full_deg": full}
     s.measurements["hold_deg"] = round(hold, 2)
+    s.measurements["hold_ms"] = int(_longest_run_ms(move, [v >= start for v in signed]))
 
     if hold < start + 2.0:
         s.verdict = NOT_SEPARABLE
@@ -141,7 +182,9 @@ def fit_blink(rest: list[Features], move: list[Features]) -> Suggestion:
         return s
 
     closure = 1.0 - move_ear / baseline
-    hold = float(np.percentile(closure, 60))
+    # Same reasoning as fit_tilt: the depth they reach, not the depth they can
+    # sustain for most of the window.
+    hold = float(np.percentile(closure, 90))
     s.measurements["hold_closure"] = round(hold, 3)
 
     if hold < 0.25:
@@ -156,6 +199,7 @@ def fit_blink(rest: list[Features], move: list[Features]) -> Suggestion:
     start = round(max(0.15, min(0.60, 0.45 * hold)), 2)
     full = round(min(0.95, max(start + 0.10, 0.85 * hold)), 2)
     s.params = {"start_ratio": start, "full_ratio": full}
+    s.measurements["hold_ms"] = int(_longest_run_ms(move, [c >= start for c in closure]))
     if hold < 0.45:
         s.verdict = MARGINAL
         s.notes.append(
@@ -190,17 +234,37 @@ def fit(
     else:
         raise ConfigError(f"scorer {action.scorer!r} has no fitting rule yet")
     s.action = action.name
+    s.gate = _suggest_gate(action, s)
     return s
 
 
-def hold_ms(frames: list[Features]) -> float:
-    if len(frames) < 2:
-        return 0.0
-    return float(frames[-1].t_ms - frames[0].t_ms)
+def _suggest_gate(action: ActionConfig, s: Suggestion) -> dict:
+    """Lower the dwell when the measured hold cannot fill the configured one.
+
+    Never raises it. A fit that lengthened the dwell would be a change nobody
+    asked for, and the person has just demonstrated they can hold the shorter
+    one; what must not happen is a dwell longer than the hold, which produces a
+    configuration that is correct and can never fire.
+    """
+    if s.verdict == NOT_SEPARABLE or not s.measurements.get("hold_ms"):
+        return {}
+    suggested = s.min_dwell_ms
+    if suggested >= action.gate.dwell_ms:
+        return {}
+    s.notes.append(
+        f"the movement was held for {s.measurements['hold_ms']} ms, which cannot fill the "
+        f"configured dwell of {action.gate.dwell_ms} ms -- dwell lowered to {suggested} ms"
+    )
+    return {"dwell_ms": suggested}
 
 
 def verify(
-    config: Config, action_name: str, params: dict, rest: list[Features], move: list[Features]
+    config: Config,
+    action_name: str,
+    params: dict,
+    rest: list[Features],
+    move: list[Features],
+    gate: dict | None = None,
 ) -> tuple[bool, int]:
     """Replay the just-collected movement through the proposed thresholds.
 
@@ -211,6 +275,8 @@ def verify(
     for action in trial.actions:
         if action.name == action_name:
             action.scorer_params = {**action.scorer_params, **params}
+            if gate:
+                action.gate = replace(action.gate, **gate)
     trial.validate()
 
     rebased = []
@@ -235,8 +301,39 @@ def verify(
     return published >= 1, dwell
 
 
+def write_session(path: Path, rest: list[Features], move: list[Features], gap_ms: int = 33) -> Path:
+    """Write a calibration's two phases as one log that ``ito replay`` accepts.
+
+    Relative timing inside each phase is preserved and the movement is offset
+    past the rest phase, so replaying the file reproduces the session a
+    threshold decision was made on. Without it, checking that decision later
+    means asking the person to perform the movement again -- which is the thing
+    recording exists to avoid, and what the handover note in GOVERNANCE.md
+    assumes is possible.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    offset = 0
+    with path.open("w", encoding="utf-8") as fh:
+        for phase in (rest, move):
+            if not phase:
+                continue
+            base = phase[0].t_ms
+            for frame in phase:
+                row = frame.as_dict()
+                row.pop("t_ms", None)
+                fh.write(json.dumps({"t_ms": offset + (frame.t_ms - base), "features": row}) + "\n")
+            offset += (phase[-1].t_ms - base) + gap_ms
+    return path
+
+
 def write_config(
-    config: Config, action_name: str, params: dict, out: Path, source: str | None
+    config: Config,
+    action_name: str,
+    params: dict,
+    out: Path,
+    source: str | None,
+    gate: dict | None = None,
 ) -> Path:
     """Write a complete config with the new thresholds.
 
@@ -255,6 +352,8 @@ def write_config(
     for item in raw.get("actions", []):
         if item.get("name") == action_name:
             item["scorer_params"] = {**(item.get("scorer_params") or {}), **params}
+            if gate:
+                item["gate"] = {**(item.get("gate") or {}), **gate}
             found = True
     if not found:
         raise ConfigError(

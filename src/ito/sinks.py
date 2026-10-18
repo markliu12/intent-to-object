@@ -33,6 +33,11 @@ def render_payload(template: str, context: dict[str, Any]) -> str:
 
 class Sink(Protocol):
     name: str
+    # True when publish() returns only after the transport has confirmed the
+    # message. It is what decides whether the latency number in the report is
+    # "frame -> broker acknowledged" or "frame -> handed to the network stack",
+    # and those two are not the same claim.
+    acknowledges: bool
 
     def publish(self, topic: str, payload: str) -> None: ...
 
@@ -41,6 +46,7 @@ class Sink(Protocol):
 
 class NullSink:
     name = "null"
+    acknowledges = False
 
     def __init__(self) -> None:
         self.sent = 0
@@ -54,6 +60,7 @@ class NullSink:
 
 class ConsoleSink:
     name = "console"
+    acknowledges = False
 
     def __init__(self, stream=None) -> None:
         self.stream = stream or sys.stdout
@@ -77,6 +84,7 @@ class MqttSink:
         password: str | None = None,
         qos: int = 0,
         retain: bool = False,
+        publish_timeout_s: float = 2.0,
     ) -> None:
         try:
             import paho.mqtt.client as mqtt
@@ -85,15 +93,39 @@ class MqttSink:
 
         self.qos = qos
         self.retain = retain
+        self.publish_timeout_s = publish_timeout_s
+        # QoS 0 is fire-and-forget by protocol: there is no PUBACK to wait for,
+        # so a latency measured here is an enqueue, not a delivery.
+        self.acknowledges = qos > 0
         self._mqtt = mqtt
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
         if username:
             self.client.username_pw_set(username, password)
-        self.client.connect(host, port, keepalive=30)
+        try:
+            self.client.connect(host, port, keepalive=30)
+        except OSError as exc:
+            raise RuntimeError(
+                f"could not reach an MQTT broker at {host}:{port} ({exc}). "
+                "Start one (for example `mosquitto -d`), or change mqtt.host / mqtt.port "
+                "in the config. `ito doctor` checks this too."
+            ) from exc
         self.client.loop_start()
 
     def publish(self, topic: str, payload: str) -> None:
-        self.client.publish(topic, payload, qos=self.qos, retain=self.retain)
+        info = self.client.publish(topic, payload, qos=self.qos, retain=self.retain)
+        if getattr(info, "rc", 0) != 0:
+            raise RuntimeError(
+                f"MQTT publish to {topic} failed with rc={info.rc}; the broker connection "
+                "is probably down. Nothing was sent, and this run should not be trusted."
+            )
+        if self.acknowledges:
+            try:
+                info.wait_for_publish(timeout=self.publish_timeout_s)
+            except (RuntimeError, ValueError) as exc:
+                raise RuntimeError(
+                    f"the broker did not acknowledge {topic} within "
+                    f"{self.publish_timeout_s:.1f}s; treat this command as not delivered."
+                ) from exc
 
     def close(self) -> None:
         self.client.loop_stop()
@@ -105,6 +137,9 @@ class MultiSink:
 
     def __init__(self, *sinks: Sink) -> None:
         self.sinks = list(sinks)
+        self.acknowledges = bool(sinks) and all(
+            getattr(sink, "acknowledges", False) for sink in self.sinks
+        )
 
     def publish(self, topic: str, payload: str) -> None:
         for sink in self.sinks:

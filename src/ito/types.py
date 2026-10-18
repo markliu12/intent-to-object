@@ -79,6 +79,13 @@ class SessionStats:
     per_action: dict = field(default_factory=dict)
     baseline_min: float = 0.0
     baseline_max: float = 0.0
+    # Availability, not accuracy: a source that yields nothing looks exactly
+    # like a working system from the outside, so the gaps are counted.
+    face_gaps: int = 0
+    max_gap_ms: int = 0
+    # True when the sink waited for the broker to acknowledge, i.e. when
+    # frame_to_publish_ms is frame -> PUBACK rather than frame -> enqueue.
+    publish_acked: bool = False
 
     def uptime_s(self) -> float:
         if self.frames < 2:
@@ -101,5 +108,8 @@ class SessionStats:
             "published": self.published,
             "blocked": self.blocked,
             "cancelled_dwells": self.cancelled_dwells,
+            "face_gaps": self.face_gaps,
+            "max_gap_ms": self.max_gap_ms,
+            "publish_acked": self.publish_acked,
             "per_action": self.per_action,
         }

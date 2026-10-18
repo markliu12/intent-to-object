@@ -1,6 +1,6 @@
 import pytest
 
-from ito.gate import Gate, GateConfig
+from ito.gate import COOLDOWN, IDLE, Gate, GateConfig
 
 
 def feed(gate, scores, dt=33, t0=0):
@@ -61,3 +61,37 @@ def test_invalid_gate_config_is_refused():
         Gate(GateConfig(on=0.35, off=0.5))
     with pytest.raises(ValueError):
         Gate(GateConfig(on=1.2, off=0.3))
+
+
+def test_a_single_noisy_frame_does_not_rearm_the_gate():
+    """A posture being held dips through the release threshold by noise alone.
+
+    Re-arming on one such frame is how "hold your head tilted" becomes two
+    commands thirty seconds apart with nobody having moved.
+    """
+    gate = Gate(GateConfig(on=0.5, off=0.35, dwell_ms=200, cooldown_ms=0), "a")
+    fires, t = feed(gate, [0.9] * 10)
+    assert len(fires) == 1
+    more, _ = feed(gate, [0.0, 0.9, 0.9, 0.9, 0.9, 0.9], t0=t)
+    assert more == []
+    assert gate.state == COOLDOWN
+
+
+def test_release_has_to_be_sustained_before_the_gate_rearms():
+    gate = Gate(GateConfig(on=0.5, off=0.35, dwell_ms=200, cooldown_ms=0, release_ms=150), "a")
+    fires, t = feed(gate, [0.9] * 10)
+    assert len(fires) == 1
+
+    feed(gate, [0.0] * 3, t0=t)  # 99 ms of release: not enough
+    assert gate.state == COOLDOWN
+
+    feed(gate, [0.0] * 4, t0=t + 3 * 33)  # now past 150 ms
+    assert gate.state == IDLE
+
+    again, _ = feed(gate, [0.9] * 10, t0=t + 7 * 33)
+    assert len(again) == 1
+
+
+def test_release_ms_must_not_be_negative():
+    with pytest.raises(ValueError, match="release_ms"):
+        Gate(GateConfig(on=0.5, off=0.35, release_ms=-1))

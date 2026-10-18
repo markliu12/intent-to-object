@@ -78,3 +78,54 @@ def test_short_dwell_produces_a_warning_not_an_error():
     raw["actions"][0]["gate"]["dwell_ms"] = 120
     cfg = from_dict(raw)
     assert any("dwell_ms" in w for w in cfg.warnings)
+
+
+def test_a_misspelt_section_key_is_rejected_rather_than_defaulted():
+    """`mqtt.hots` used to fall back to localhost in silence, which is the exact
+    failure the module docstring says the loader prevents."""
+    raw = default_dict()
+    raw["mqtt"]["hots"] = "broker.local"
+    with pytest.raises(ConfigError, match="unknown key"):
+        from_dict(raw)
+
+
+def test_unknown_camera_key_is_rejected():
+    raw = default_dict()
+    raw["camera"]["indx"] = 0
+    with pytest.raises(ConfigError, match="unknown key"):
+        from_dict(raw)
+
+
+def test_unknown_perception_key_is_rejected():
+    raw = default_dict()
+    raw["perception"]["baseline_window"] = 10
+    with pytest.raises(ConfigError, match="unknown key"):
+        from_dict(raw)
+
+
+def test_qos_outside_zero_to_two_is_rejected():
+    raw = default_dict()
+    raw["mqtt"]["qos"] = 3
+    with pytest.raises(ConfigError, match="qos"):
+        from_dict(raw)
+
+
+def test_plain_text_credentials_produce_a_warning():
+    raw = default_dict()
+    raw["mqtt"]["username"] = "someone"
+    raw["mqtt"]["password"] = "hunter2"
+    cfg = from_dict(raw)
+    assert any("plain text" in w for w in cfg.warnings)
+
+
+def test_shipped_example_does_not_drift_from_the_builtin_default():
+    """Three copies of the defaults exist because YAML cannot import them. The
+    values, at least, have to agree."""
+    import yaml
+
+    repo = Path(__file__).resolve().parents[1]
+    example = yaml.safe_load((repo / "configs" / "example.yaml").read_text(encoding="utf-8"))
+    builtin = default_dict()
+    assert example["actions"][0]["scorer_params"] == builtin["actions"][0]["scorer_params"]
+    assert example["actions"][0]["gate"] == builtin["actions"][0]["gate"]
+    assert example["perception"] == builtin["perception"]

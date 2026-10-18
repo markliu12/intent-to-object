@@ -1,5 +1,83 @@
 # Changelog
 
+## 0.2.1
+
+Everything here came out of an adversarial read of 0.2 rather than from a
+feature list. The theme: **the tool was making claims it had not implemented,
+in a project whose whole argument is that it does not do that.** Each entry
+names the claim that was false.
+
+### Fixed
+
+- **The version number was 0.1.0 in the code and 0.2.0 everywhere else.** The
+  README's own pasted transcript could not be reproduced by running the command
+  it documents. `__version__` now comes from package metadata with a fallback,
+  and `tests/test_version.py` fails if pyproject, the fallback and the README
+  disagree.
+- **An unreachable broker produced a traceback.** `cli.main` catches config and
+  source errors, not `OSError`, so the first run with a forgotten `mosquitto -d`
+  printed a stack trace — in a CLI whose own opening paragraph says every command
+  either works or tells you what is missing. It is now a sentence with the
+  host, the port and the next step.
+- **The latency metric measured an enqueue and called it a PUBACK.** At the
+  default `qos: 0` there is no acknowledgement in the protocol, and
+  `publish()` returned without checking even the client-side return code. With
+  `qos >= 1` the sink now waits for PUBACK and a failed publish raises; the
+  session summary labels the line `frame->enqueue` or `frame->PUBACK` according
+  to what was actually measured.
+- **`ito explain` rendered the end-of-session record as a command.** It came out
+  as `unknown held 0 ms at confidence 0.00 -> declined ()`, and added an `?` to
+  the declined-by-reason table — on the one surface a care worker is meant to
+  read. Session records now render as one summary sentence.
+- **`ito calibrate` never touched the dwell.** `Suggestion.min_dwell_ms` and
+  `hold_ms()` existed and were called by nothing, so a person who can hold for
+  300 ms received thresholds they could reach and a 450 ms dwell they could
+  never fill: correct, verified against the wrong criterion, and permanently
+  silent. The fit now measures the longest continuous hold above threshold and
+  lowers `dwell_ms` when it cannot fill the configured one. It never raises it.
+- **The gate re-armed on a single noisy frame.** After the cooldown, one frame
+  below `off` was enough, so a held posture that dipped through the boundary by
+  noise could fire twice. `gate.release_ms` (150 ms by default) requires the
+  release to be sustained.
+- **Misspelt keys in four config sections were silently ignored.** `mqtt.hots`
+  fell back to localhost while the loader's docstring promised that config
+  errors are louder than runtime errors. `camera`, `perception`, `mqtt` and
+  `output` are now checked like `policy` and `actions`, and `qos`/`port` are
+  validated.
+- **Losing the face was invisible.** The source counted missing frames into a
+  variable nothing read, and a session where the person had walked away was
+  indistinguishable from a working one. Gaps between usable frames longer than
+  `perception.face_lost_warn_s` are now warned about live and counted in the
+  session summary (`face_gaps`, `max_gap_ms`).
+
+### Added
+
+- **`ito review` asks about the opposite error.** The log can only contain
+  commands that fired, so every threshold change that reduces false triggers
+  also increases silent misses — and nothing in the tool showed the second
+  effect. One extra question per session produces `missed`, `miss_rate_pct` and
+  `missed_per_hour` next to the false-trigger rate. Blank means "not reported",
+  never zero.
+- **`ito calibrate` keeps what it captured.** It writes the session next to the
+  fitted config (gitignored) and prints the `ito replay` command, so a threshold
+  decision can be re-examined later without asking the person to perform the
+  movement again. GOVERNANCE.md already assumed this was possible; it was not.
+- A warning when `mqtt.username` is set, because the config is plain text and
+  `docs/safety.md` asks people to paste it into issues.
+- `tests/test_cli.py`, and `tests/test_sinks.py` now drives `MqttSink` through a
+  fake paho: the command surface and the transport contract were the two places
+  the bugs above actually lived, and neither had a test.
+
+### Changed
+
+- `*.review.json`, `*.calibrated.yaml` are gitignored. The review file is a
+  per-command human judgement about a person's intent; it should not be one
+  `git add -A` away from a public repository.
+- `mediapipe` is pinned `<0.11`, matching what `ito doctor` already told people
+  to do. The packaging and the diagnostic disagreed about the supported range.
+- Formatting is now enforced in CI (`ruff format --check`), and the test matrix
+  includes 3.11 instead of skipping it.
+
 ## 0.2.0
 
 The theme: the three MVP metrics existed only as documentation. Now the code

@@ -10,6 +10,10 @@ Hysteresis (``off`` < ``on``) keeps a signal sitting near the boundary from
 chattering, and the cancelled-dwell counter is the cheapest false-positive
 diagnostic in the system: a user who produces many cancellations is producing
 movement the thresholds are only half-reading.
+
+``release_ms`` is the second half of that idea on the way back out: the signal
+has to stay below ``off`` for a moment before the gate re-arms, because a
+posture that is being held dips through the boundary by noise alone.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ class GateConfig:
     off: float = 0.35
     dwell_ms: int = 400
     cooldown_ms: int = 1500
+    release_ms: int = 150
 
     def validate(self) -> None:
         if not 0.0 < self.off < self.on <= 1.0:
@@ -37,6 +42,8 @@ class GateConfig:
             raise ValueError("dwell_ms must be >= 0")
         if self.cooldown_ms < 0:
             raise ValueError("cooldown_ms must be >= 0")
+        if self.release_ms < 0:
+            raise ValueError("release_ms must be >= 0")
 
 
 class Gate:
@@ -77,11 +84,16 @@ class Gate:
                 return fire
             return None
 
-        # COOLDOWN: wait out the cooldown, then wait for release before re-arming.
+        # COOLDOWN: wait out the cooldown, then wait for a *sustained* release
+        # before re-arming. A single frame below ``off`` is not a release: the
+        # signal of someone holding a posture dips through the boundary all the
+        # time, and re-arming on one noisy frame is how a held head tilt becomes
+        # a second command at 3 a.m.
         if score < cfg.off:
             if self._t_release is None:
                 self._t_release = t_ms
-            if t_ms - self._last_fire >= cfg.cooldown_ms:
+            released = t_ms - self._t_release >= cfg.release_ms
+            if released and t_ms - self._last_fire >= cfg.cooldown_ms:
                 self.state = IDLE
                 self._t_release = None
         else:

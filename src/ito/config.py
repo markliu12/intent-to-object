@@ -32,6 +32,13 @@ DEFAULT_PAYLOAD = (
 
 _TOP_KEYS = {"camera", "perception", "mqtt", "policy", "output", "actions"}
 _ACTION_KEYS = {"name", "scorer", "scorer_params", "gate", "risk", "topic", "payload"}
+_SECTION_KEYS = {
+    "camera": {"index", "width", "height"},
+    "perception": {"baseline_window_s", "baseline_min_samples", "face_lost_warn_s"},
+    "mqtt": {"host", "port", "client_id", "username", "password", "qos", "retain"},
+    "policy": {"rate_limit_per_min"},
+    "output": {"audit_path"},
+}
 
 
 @dataclass
@@ -175,14 +182,41 @@ def from_dict(raw: dict[str, Any]) -> Config:
             "policy.allow_medium was removed: whether a human is present is now stated on "
             "the command line (`ito run --confirm`), not in the config. Delete the key."
         )
-    _check_keys(cfg.policy, {"rate_limit_per_min"}, "policy")
+    # Every section, not just the ones with interesting rules: a misspelt
+    # `mqtt.hots` that silently falls back to localhost is the exact failure this
+    # module's opening paragraph promises to prevent.
+    for section, allowed in _SECTION_KEYS.items():
+        _check_keys(getattr(cfg, section), allowed, section)
     default = Config()
     for key in ("camera", "perception", "mqtt", "policy", "output"):
         merged = getattr(default, key).copy()
         merged.update(getattr(cfg, key))
         setattr(cfg, key, merged)
+    _validate_sections(cfg)
     cfg.validate()
     return cfg
+
+
+def _validate_sections(cfg: Config) -> None:
+    qos = cfg.mqtt.get("qos", 0)
+    if isinstance(qos, bool) or not isinstance(qos, int) or qos not in (0, 1, 2):
+        raise ConfigError(f"mqtt.qos must be 0, 1 or 2, got {qos!r}")
+    port = cfg.mqtt.get("port", 1883)
+    if not isinstance(port, int) or not 0 < port < 65536:
+        raise ConfigError(f"mqtt.port must be a TCP port, got {port!r}")
+    if not isinstance(cfg.mqtt.get("host", ""), str) or not cfg.mqtt.get("host"):
+        raise ConfigError("mqtt.host must be a non-empty string")
+    for key in ("index", "width", "height"):
+        value = cfg.camera.get(key)
+        if not isinstance(value, int) or value < 0:
+            raise ConfigError(f"camera.{key} must be a non-negative integer, got {value!r}")
+    if cfg.camera["width"] <= 0 or cfg.camera["height"] <= 0:
+        raise ConfigError("camera.width and camera.height must be positive")
+    if cfg.mqtt.get("username"):
+        cfg.warnings.append(
+            "mqtt.username/password are stored in plain text in this file; delete them "
+            "before pasting the config into an issue or a bug report"
+        )
 
 
 def load(path: Path | None) -> Config:
@@ -204,7 +238,11 @@ def default_dict() -> dict[str, Any]:
     """
     return {
         "camera": {"index": 0, "width": 640, "height": 480},
-        "perception": {"baseline_window_s": 20.0, "baseline_min_samples": 15},
+        "perception": {
+            "baseline_window_s": 20.0,
+            "baseline_min_samples": 15,
+            "face_lost_warn_s": 3.0,
+        },
         "mqtt": {"host": "localhost", "port": 1883, "qos": 0, "retain": False},
         "policy": {"rate_limit_per_min": 20},
         "output": {"audit_path": "logs/audit.jsonl"},
@@ -212,8 +250,19 @@ def default_dict() -> dict[str, Any]:
             {
                 "name": "tilt_left",
                 "scorer": "tilt",
-                "scorer_params": {"start_deg": 5.0, "full_deg": 13.0, "direction": "left"},
-                "gate": {"on": 0.5, "off": 0.35, "dwell_ms": 450, "cooldown_ms": 1800},
+                "scorer_params": {
+                    "start_deg": 5.0,
+                    "full_deg": 13.0,
+                    "direction": "left",
+                    "neutral_deg": 0.0,
+                },
+                "gate": {
+                    "on": 0.5,
+                    "off": 0.35,
+                    "dwell_ms": 450,
+                    "cooldown_ms": 1800,
+                    "release_ms": 150,
+                },
                 "risk": "low",
                 "topic": "ito/intent/tilt_left",
                 "payload": DEFAULT_PAYLOAD,

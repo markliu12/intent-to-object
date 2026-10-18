@@ -23,13 +23,13 @@ Then:
 |---|---|
 | capture + landmark | frame timestamp at `cv2.read()` vs. `Features.t_ms` |
 | scoring + gate | already in `Fire.t_ms` and `dwell_ms` |
-| publish | wall clock at `client.publish()`; PUBACK for QoS 1 |
+| publish | `publish_us`: with QoS 1 it returns after PUBACK; at QoS 0 it returns at enqueue |
 
 **Report** median and p90 over at least 50 deliberate movements, plus the frame interval of the camera. On a 30 fps camera the frame quantisation floor alone is ~33 ms, and at 15 fps it is ~67 ms — say which one you used.
 
 **Do not report the scorer's inference time as latency.** It is one row of the table.
 
-**What the tool already reports.** Every published record carries `decision_us`, `publish_us` and `frame_to_publish_ms`, and the session summary prints the median and p90 of frame-to-publish, split into scoring/gate and publish. That covers *frame exists → broker has it*, which is the part this project is responsible for. It deliberately does not claim to cover *onset → frame*: that interval is set by the camera and has to be measured as described above.
+**What the tool already reports.** Every published record carries `decision_us`, `publish_us` and `frame_to_publish_ms`, and the session summary prints the median and p90 of frame-to-publish, split into scoring/gate and publish. The heading of that line is the claim: `frame->PUBACK` at QoS 1, `frame->enqueue` at QoS 0, because QoS 0 has no acknowledgement to wait for. Reporting an enqueue as a PUBACK is the kind of quiet flattery this file exists to prevent, so if you need the acknowledged number, set `mqtt.qos: 1`. It deliberately does not claim to cover *onset → frame*: that interval is set by the camera and has to be measured as described above.
 
 ## 2. False-trigger rate
 
@@ -54,6 +54,8 @@ Then:
 
 A configuration that halves the false-trigger rate by doubling the required movement is a regression for anyone with a progressive condition. Say so when you report it, even if the first number looks better.
 
+**The opposite error, which the log cannot see.** A decision log contains only commands that fired. Raising a threshold therefore improves every number in the file while making the device less usable, and no amount of reading the log will show that. So `ito review` ends with one more question — *how many times did you make the movement and nothing happened* — and reports missed commands as a count, a percentage of attempts, and a rate per hour next to the false-trigger rate. Two configurations are comparable only when both numbers are present. A blank answer means "not reported", never zero.
+
 **What the tool already does.** Every run appends a session record carrying the exposure, and `ito review <log>` asks about each command one at a time and divides by that exposure. The asking cannot be automated: nobody has found a way to infer "the user did not mean that" from a camera, and a system that guesses about intent and then reports its own guess as accuracy is worse than a clipboard. The review must be answered by the user or their carer, not by whoever tuned the thresholds.
 
 ## 3. Re-calibration time
@@ -66,7 +68,7 @@ Include: finding the file, understanding the two numbers, the edit, the restart,
 
 **Target: ≤ 30 s**, without the maintainer. Today this is a hand edit of `start_deg` / `full_deg` in a YAML file, which is honest but does not meet the target. A guided re-fit is the milestone that closes it.
 
-**What the tool already does.** `ito calibrate` prints its own elapsed time, measured from invocation to a configuration that has been *verified* by replaying the captured movement through it. Both halves matter: the time is only meaningful if the configuration at the end actually fires, so adopting the numbers without the verification would make the measurement a lie. On `--source synthetic` the elapsed time is not a measurement and the command says so.
+**What the tool already does.** `ito calibrate` prints its own elapsed time, measured from invocation to a configuration that has been *verified* by replaying the captured movement through it. Both halves matter: the time is only meaningful if the configuration at the end actually fires, so adopting the numbers without the verification would make the measurement a lie. It keeps the captured session next to the fitted config, which is how the same recording can be re-scored after a later change without the user performing anything. On `--source synthetic` the elapsed time is not a measurement and the command says so.
 
 ## Reporting template
 

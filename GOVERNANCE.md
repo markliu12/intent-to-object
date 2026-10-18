@@ -27,7 +27,7 @@ Anything that would make the project impossible to hand over is treated as a bug
 - **Bus factor check, each release:** could a competent Python developer who has never spoken to the maintainer release this, using only the repository? If the answer is no, the release is blocked and the missing documentation is written first.
 - **No private infrastructure.** Nothing in the release path depends on the maintainer's machine.
 - **No unexplained components.** Every module that carries a non-obvious decision has the reason in a comment next to it, not in a person's head.
-- **Recorded sessions beat recreations.** A recorded landmark file plus `ito replay` lets a successor reproduce a threshold decision without asking a user to perform the movement again.
+- **Recorded sessions beat recreations.** A recorded landmark file plus `ito replay` lets a successor reproduce a threshold decision without asking a user to perform the movement again. `ito calibrate` writes the session it measured next to the fitted config for exactly this reason; do not delete one and keep the other.
 
 ## How the project can be replaced
 

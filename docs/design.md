@@ -85,6 +85,8 @@ Head tilt is an angle. A held blink is eye-aspect ratio below a personal baselin
 
 Fire once, then refuse to fire again until the signal drops below the release threshold. A user holding the movement for four seconds gets one command.
 
+*And stays below it.* `release_ms` (150 ms by default) makes the release a state rather than an instant, because a posture that is being held dips through the boundary by noise alone, and one such frame used to be enough to re-arm the gate. This is a bug fix in 0.2.1 that became a decision: the release requirement is not "you moved away once", it is "you are not currently holding the movement".
+
 *Wrong if:* users cannot reliably release (some conditions cause sustained contraction). The mitigation is a rate limit and a different release condition — an explicit second signal — not removing the release requirement.
 
 ### D4. Risk tiers enforced at load time

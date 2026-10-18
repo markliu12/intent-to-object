@@ -64,11 +64,13 @@ class Pipeline:
         audit: AuditLog | None = None,
         confirmer: Callable[[str, Fire], bool] | None = None,
         on_event: Callable[[dict], None] | None = None,
+        on_warning: Callable[[str], None] | None = None,
     ) -> None:
         self.config = config
         self.sink = sink
         self.audit = audit or AuditLog(None)
         self.on_event = on_event
+        self.on_warning = on_warning
         self.bound: list[Bound] = [
             Bound(a, build_scorer(a.scorer, a.scorer_params), Gate(a.gate, a.name))
             for a in config.actions
@@ -79,7 +81,9 @@ class Pipeline:
             window_ms=window,
             min_samples=int(config.perception.get("baseline_min_samples", 15)),
         )
+        self.face_lost_warn_ms = int(float(config.perception.get("face_lost_warn_s", 3.0)) * 1000)
         self.stats = SessionStats()
+        self.stats.publish_acked = bool(getattr(sink, "acknowledges", False))
         self._published: dict = {}
         self._t0: int | None = None
         self._b_min = 0.0
@@ -87,11 +91,25 @@ class Pipeline:
 
     def process(self, frame: Features) -> list[dict]:
         stats = self.stats
+        # A source only yields frames it could read, so the difference between
+        # two consecutive timestamps is exactly the time during which nothing
+        # was arriving: the face was lost, or the camera stalled. Silence is the
+        # one failure this system otherwise cannot report.
+        gap_ms = frame.t_ms - stats.last_ms if stats.frames else 0
         stats.frames += 1
         if self._t0 is None:
             self._t0 = frame.t_ms
             stats.started_ms = frame.t_ms
         stats.last_ms = frame.t_ms
+
+        if gap_ms >= self.face_lost_warn_ms:
+            stats.face_gaps += 1
+            stats.max_gap_ms = max(stats.max_gap_ms, gap_ms)
+            if self.on_warning:
+                self.on_warning(
+                    f"no usable frame for {gap_ms / 1000.0:.1f}s "
+                    f"(face lost or camera stalled) at t={frame.t_ms / 1000.0:.0f}s"
+                )
 
         baseline = self.baseline.update(frame.t_ms, frame.ear)
         if baseline > 0:

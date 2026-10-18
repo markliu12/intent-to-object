@@ -6,6 +6,8 @@ from ito.calibrate import (
     MARGINAL,
     NOT_SEPARABLE,
     USABLE,
+    Suggestion,
+    _suggest_gate,
     fit,
     fit_blink,
     fit_tilt,
@@ -14,6 +16,7 @@ from ito.calibrate import (
 )
 from ito.config import load
 from ito.sources import synthetic_features
+from ito.types import Features
 
 
 def rest_frames(seconds=8.0, seed=7):
@@ -100,3 +103,90 @@ def test_written_config_is_valid_and_carries_the_new_thresholds(tmp_path):
     # the gate and topic must survive the rewrite untouched
     assert reloaded.actions[0].topic == config.actions[0].topic
     assert reloaded.actions[0].gate.dwell_ms == config.actions[0].gate.dwell_ms
+
+
+def test_fit_measures_how_long_the_movement_could_be_held():
+    """The third number a dwell has to fit inside is a duration, not an angle."""
+    s = fit_tilt(rest_frames(), move_frames())
+    assert s.measurements["hold_ms"] > 1000
+    assert 200 <= s.min_dwell_ms <= 600
+
+
+def test_dwell_is_lowered_when_the_measured_hold_cannot_fill_it():
+    action = load(None).actions[0]  # dwell_ms = 450
+    s = Suggestion(action="tilt_left", kind="tilt", measurements={"hold_ms": 700})
+    gate = _suggest_gate(action, s)
+    assert gate == {"dwell_ms": 315}
+    assert any("dwell lowered" in note for note in s.notes)
+
+
+def test_dwell_is_never_raised_by_a_fit():
+    action = load(None).actions[0]
+    s = Suggestion(action="tilt_left", kind="tilt", measurements={"hold_ms": 5_000})
+    assert _suggest_gate(action, s) == {}
+
+
+def test_a_refused_movement_suggests_no_dwell_change():
+    action = load(None).actions[0]
+    s = Suggestion(
+        action="tilt_left", kind="tilt", verdict=NOT_SEPARABLE, measurements={"hold_ms": 700}
+    )
+    assert _suggest_gate(action, s) == {}
+
+
+def test_verification_uses_the_dwell_it_is_about_to_write():
+    config = load(None)
+    rest, move = rest_frames(), move_frames()
+    s = fit(config, "tilt_left", rest, move)
+    ok, dwell = verify(config, "tilt_left", s.params, rest, move, {"dwell_ms": 300})
+    assert ok
+    assert 300 <= dwell <= 380
+
+
+def test_written_config_carries_the_lowered_dwell(tmp_path):
+    config = load(None)
+    rest, move = rest_frames(), move_frames()
+    s = fit(config, "tilt_left", rest, move)
+    out = write_config(
+        config, "tilt_left", s.params, tmp_path / "fitted.yaml", None, gate={"dwell_ms": 315}
+    )
+    assert load(out).actions[0].gate.dwell_ms == 315
+
+
+def short_hold(degrees=14.0, hold_ms=600, window_ms=6000):
+    """A movement the user can only sustain for part of the capture window."""
+    frames = []
+    t = 0
+    while t < window_ms:
+        frames.append(
+            Features(
+                t_ms=t,
+                roll_deg=degrees if t < hold_ms else 0.0,
+                yaw=0.0,
+                pitch=0.0,
+                ear=0.30,
+                brow_raise=0.28,
+            )
+        )
+        t += 33
+    return frames
+
+
+def test_a_short_hold_is_usable_and_gets_a_dwell_it_can_fill():
+    """The person this project is for often cannot hold for a whole capture.
+
+    Refusing them is wrong; handing them thresholds they can reach and a dwell
+    they cannot fill is worse, because it verifies as "correct" and then never
+    fires.
+    """
+    config = load(None)
+    quiet, move = rest_frames(), short_hold()
+
+    s = fit(config, "tilt_left", quiet, move)
+    assert s.verdict == USABLE
+    assert s.measurements["hold_ms"] >= 500
+    assert s.gate["dwell_ms"] < config.actions[0].gate.dwell_ms
+
+    ok, dwell = verify(config, "tilt_left", s.params, quiet, move, s.gate)
+    assert ok
+    assert dwell <= s.gate["dwell_ms"] + 40

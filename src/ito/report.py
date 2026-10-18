@@ -27,6 +27,7 @@ def format_summary(
     *,
     label: str = "session",
     fps: float | None = None,
+    user_session: bool = False,
 ) -> str:
     lines = []
     duration = stats.uptime_s()
@@ -45,6 +46,11 @@ def format_summary(
     lines.append(
         f"dwells cancelled  {stats.cancelled_dwells}  (movement started, released too early)"
     )
+    if stats.face_gaps:
+        lines.append(
+            f"face lost         {stats.face_gaps} gap(s), longest {stats.max_gap_ms / 1000.0:.1f} s"
+            "  (nothing can fire while the face is missing)"
+        )
 
     if hours > 0:
         if duration >= 60:
@@ -69,8 +75,11 @@ def format_summary(
         )
     if stats.frame_to_publish_ms:
         lat = np.asarray(stats.frame_to_publish_ms, dtype=float)
+        # The label is the claim: naming an enqueue "PUBACK" is exactly the kind
+        # of flattery this project exists not to do.
+        heading = "frame->PUBACK" if stats.publish_acked else "frame->enqueue"
         lines.append(
-            f"frame->publish    median {np.median(lat):.1f} ms"
+            f"{heading:<18}median {np.median(lat):.1f} ms"
             f"   p90 {_pct(lat, 90):.1f} ms   n={lat.size}"
         )
         if stats.decision_us and stats.publish_us:
@@ -79,6 +88,11 @@ def format_summary(
             lines.append(
                 f"  of which        scoring+gate {decision:.2f} ms, publish {publish:.2f} ms,"
                 " rest is landmark extraction"
+            )
+        if not stats.publish_acked:
+            lines.append(
+                "                  qos 0 has no broker acknowledgement: this stops when the "
+                "message is handed to the network stack, not when the broker has it"
             )
         lines.append(
             "                  this is software latency only: the time from the movement"
@@ -102,8 +116,14 @@ def format_summary(
             lines.append(f"  ! {w}")
 
     lines.append("")
-    lines.append(
-        "not a user measurement  |  synthetic and replayed sessions exercise the "
-        "chain; they say nothing about accuracy on a person"
-    )
+    if user_session:
+        lines.append(
+            "a session on one person  |  this is a measurement of one sitting, not of the "
+            "population: say how many, over what activity, when you quote it"
+        )
+    else:
+        lines.append(
+            "not a user measurement  |  synthetic and replayed sessions exercise the "
+            "chain; they say nothing about accuracy on a person"
+        )
     return "\n".join(lines)

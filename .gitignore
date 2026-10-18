@@ -14,6 +14,14 @@ htmlcov/
 logs/
 *.jsonl
 
+# human judgements about whether a command was intended: health-adjacent data
+# that arrives next to the log, not inside it (*.jsonl does not match these)
+*.review.json
+
+# calibration output and CI scratch files
+*.calibrated.yaml
+/calibrated.yaml
+
 # recordings of a person's face geometry -- personal data, never commit
 recordings/
 *.landmarks.jsonl

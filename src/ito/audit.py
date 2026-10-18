@@ -49,6 +49,31 @@ class AuditLog:
         self.close()
 
 
+def is_session(record: dict[str, Any]) -> bool:
+    """True for the end-of-session summary, which is a record but not an event."""
+    return record.get("kind") == "session"
+
+
+def render_session(record: dict[str, Any]) -> str:
+    """The session summary as a sentence, so it is not rendered as a command.
+
+    Before this existed, ``ito explain`` printed the summary through
+    ``render_record`` and produced a line that read like a declined command
+    called "unknown" -- on the one surface a care worker is supposed to read.
+    """
+    duration = float(record.get("duration_s", 0.0) or 0.0)
+    gaps = int(record.get("face_gaps", 0) or 0)
+    text = (
+        f"session ended  {duration:.1f}s, {record.get('frames', 0)} frames "
+        f"({record.get('frames_scored', 0)} usable), {record.get('published', 0)} sent, "
+        f"{record.get('blocked', 0)} blocked, "
+        f"{record.get('cancelled_dwells', 0)} cancelled"
+    )
+    if gaps:
+        text += f", face lost {gaps}x (longest {int(record.get('max_gap_ms', 0)) / 1000.0:.1f}s)"
+    return text
+
+
 def render_record(record: dict[str, Any]) -> str:
     """One record as a sentence a non-programmer can act on."""
     ts = str(record.get("ts", ""))[11:19] or "??:??:??"

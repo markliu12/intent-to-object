@@ -34,6 +34,7 @@ The system fails **closed**: an intent that is not published does nothing.
 |---|---|
 | camera unplugged / covered | no landmarks, no features, no publications; the process logs nothing and keeps waiting |
 | face lost for a moment | frames are skipped, the dwell state machine is unaffected |
+| face lost for longer than `perception.face_lost_warn_s` (3 s by default) | a warning is printed and the gap is counted in the session summary — silence is the one failure that is otherwise indistinguishable from working |
 | laptop sleeps | the process is suspended with the OS; nothing is sent while suspended |
 | MQTT broker down | `--mqtt` fails loudly at startup; it does not silently continue without publishing |
 | process crashes | no publications, by construction — there is no daemon watching it |
@@ -54,6 +55,8 @@ The false-trigger rate is measured with an exposure denominator and reported nex
 - **`ito record` writes face landmarks, not images.** They are still personal data: a landmark file is a measurement of a specific person's face. Treat it like a photo. Do not commit one, do not send one to a maintainer.
 - **Nothing is transmitted** except the MQTT payload you configured, to the broker you configured. There is no telemetry, no analytics, no update check.
 - **The audit log** contains timestamps, action names, confidence values and dwell times. It contains no imagery. It does reveal when a person was awake and issuing commands — treat it as health-adjacent data and keep it where you keep other care records.
+- **`ito review` writes `<log>.review.json` next to the log.** It contains one human judgement per command about whether that command was intended, which is a stronger statement about a person than anything in the audit log. It is gitignored; keep it with the log, and delete both together.
+- **The config may contain MQTT credentials in plain text.** The loader warns when it does. If you paste a config into an issue, delete `mqtt.username` and `mqtt.password` first — a safety report is not a reason to publish a broker password.
 
 ## Reporting a safety problem
 

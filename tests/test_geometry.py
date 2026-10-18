@@ -8,7 +8,6 @@ from ito.geometry import (
     canonicalize,
     extract_features,
     ramp,
-    suggest_thresholds,
 )
 
 W, H = 640.0, 480.0
@@ -120,10 +119,3 @@ def test_ramp_clamps():
     assert ramp(5.0, 5.0, 13.0) == 0.0
     assert ramp(9.0, 5.0, 13.0) == pytest.approx(0.5)
     assert ramp(99.0, 5.0, 13.0) == 1.0
-
-
-def test_suggest_thresholds_sits_above_resting_noise():
-    quiet = [0.2, -0.1, 0.4, -0.3, 0.1, 0.0, 0.2, -0.2, 0.3, 0.0]
-    start, full = suggest_thresholds(quiet)
-    assert start >= 2.0
-    assert full > start

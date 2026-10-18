@@ -162,20 +162,3 @@ def ramp(value: float, start: float, full: float) -> float:
     if full <= start:
         raise ValueError("full must be greater than start")
     return float(min(1.0, max(0.0, (value - start) / (full - start))))
-
-
-def suggest_thresholds(samples: Sequence[float], k: float = 4.0) -> tuple[float, float] | None:
-    """Turn a quiet baseline sample into (start, full) thresholds.
-
-    ``start`` is placed a few standard deviations above the resting level so a
-    resting posture does not sit on the trigger boundary; ``full`` is placed
-    where the movement is unambiguous. Used by ``ito calibrate``.
-    """
-    if len(samples) < 8:
-        return None
-    arr = np.asarray(samples, dtype=float)
-    quiet = float(np.abs(arr).mean())
-    noise = float(np.abs(arr).std()) or 0.5
-    start = max(2.0, quiet + k * noise)
-    full = max(start * 2.0, start + 5.0)
-    return start, full

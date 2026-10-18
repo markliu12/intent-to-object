@@ -18,8 +18,8 @@ from pathlib import Path
 import yaml
 
 from . import __version__
-from .audit import AuditLog, read_jsonl, render_record
-from .calibrate import NOT_SEPARABLE, fit, verify, write_config
+from .audit import AuditLog, is_session, read_jsonl, render_record, render_session
+from .calibrate import NOT_SEPARABLE, fit, verify, write_config, write_session
 from .config import Config, ConfigError, load
 from .pipeline import Pipeline
 from .policy import StdinConfirmer
@@ -103,7 +103,8 @@ _MEASUREMENT_LABELS = {
     "rest_median_deg": ("rest, median", "deg"),
     "rest_band_deg": ("rest, 95% band", "deg"),
     "rest_noise_deg": ("rest, noise", "deg"),
-    "hold_deg": ("movement held", "deg above rest"),
+    "hold_deg": ("movement reached", "deg above rest"),
+    "hold_ms": ("held above threshold", "ms"),
     "rest_ear_median": ("open-eye EAR", ""),
     "rest_ear_noise": ("EAR noise", ""),
     "move_ear_median": ("EAR while closed", ""),
@@ -111,6 +112,14 @@ _MEASUREMENT_LABELS = {
     "samples_rest": ("rest frames", ""),
     "samples_move": ("movement frames", ""),
 }
+
+
+def _default_out(args) -> Path:
+    return (
+        Path(args.out)
+        if args.out
+        else Path((args.config or "configs/example.yaml").replace(".yaml", "") + ".calibrated.yaml")
+    )
 
 
 def cmd_calibrate(args) -> int:
@@ -148,6 +157,18 @@ def cmd_calibrate(args) -> int:
             "Try a brighter room or a smaller distance to the camera."
         )
 
+    # Keep what was captured. Without it, checking a threshold change later means
+    # asking the person to perform the movement again -- which is exactly what
+    # replay exists to avoid, and the handover story in GOVERNANCE.md assumes.
+    session_path = None
+    if not args.no_session and (args.session or args.source != "synthetic"):
+        session_path = (
+            Path(args.session) if args.session else _default_out(args).with_suffix(".session.jsonl")
+        )
+        write_session(session_path, rest, move)
+        print(f"          session saved to {session_path}")
+        print(f"          replay it later with:  ito replay {session_path}")
+
     suggestion = fit(config, name, rest, move)
 
     print()
@@ -155,15 +176,18 @@ def cmd_calibrate(args) -> int:
     for key, (label, unit) in _MEASUREMENT_LABELS.items():
         if key in suggestion.measurements:
             unit_txt = f" {unit}" if unit else ""
-            print(f"  {label:<20}{suggestion.measurements[key]}{unit_txt}")
+            print(f"  {label:<22}{suggestion.measurements[key]}{unit_txt}")
 
     action = next(a for a in config.actions if a.name == name)
     print()
     print("thresholds")
-    print(f"  {'':<20}{'current':>10}{'fitted':>10}")
+    print(f"  {'':<22}{'current':>10}{'fitted':>10}")
     for key, value in suggestion.params.items():
         old = action.scorer_params.get(key, "-")
-        print(f"  {key:<20}{str(old):>10}{str(value):>10}")
+        print(f"  {key:<22}{str(old):>10}{str(value):>10}")
+    for key, value in suggestion.gate.items():
+        old = getattr(action.gate, key, "-")
+        print(f"  {key:<22}{str(old):>10}{str(value):>10}")
 
     print()
     print(f"verdict              {suggestion.verdict}")
@@ -171,7 +195,7 @@ def cmd_calibrate(args) -> int:
         print(f"  {note}")
 
     if suggestion.verdict != NOT_SEPARABLE:
-        ok, dwell = verify(config, name, suggestion.params, rest, move)
+        ok, dwell = verify(config, name, suggestion.params, rest, move, suggestion.gate)
         if ok:
             print(f"verified             a command fired after {dwell} ms of holding")
         else:
@@ -182,14 +206,15 @@ def cmd_calibrate(args) -> int:
         ok = False
         print("not verified         thresholds were not written")
 
-    out = (
-        Path(args.out)
-        if args.out
-        else Path((args.config or "configs/example.yaml").replace(".yaml", "") + ".calibrated.yaml")
-    )
+    out = _default_out(args)
     if suggestion.verdict != NOT_SEPARABLE:
         written = write_config(
-            config, name, suggestion.params, out, args.config if args.config else None
+            config,
+            name,
+            suggestion.params,
+            out,
+            args.config if args.config else None,
+            gate=suggestion.gate,
         )
         print(f"wrote                {written}")
 
@@ -211,7 +236,7 @@ def cmd_calibrate(args) -> int:
 
 
 def cmd_review(args) -> int:
-    from .review import review
+    from .review import ask_missed_count, review
 
     if not sys.stdin or not sys.stdin.isatty():
         print(
@@ -221,11 +246,15 @@ def cmd_review(args) -> int:
         )
         return 2
     try:
-        review(Path(args.file))
+        review(Path(args.file), ask_missed=ask_missed_count)
     except KeyboardInterrupt:
         print("\nstopped early; nothing was written")
         return 130
     return 0
+
+
+def _warner(message: str) -> None:
+    print(f"! {message}", file=sys.stderr)
 
 
 def cmd_demo(args) -> int:
@@ -242,6 +271,7 @@ def cmd_demo(args) -> int:
         _make_sink(args, config),
         _audit(args, config),
         on_event=_printer,
+        on_warning=_warner,
     )
     print(
         f"intent-to-object {__version__}  |  scripted session, "
@@ -280,6 +310,7 @@ def cmd_run(args) -> int:
         _audit(args, config),
         confirmer=build_confirmer(args),
         on_event=_printer,
+        on_warning=_warner,
     )
     print(
         f"intent-to-object {__version__}  |  actions: "
@@ -305,13 +336,19 @@ def cmd_run(args) -> int:
         print()
         print("stopped.")
     print()
-    print(format_summary(stats, config, label="live session"))
+    print(format_summary(stats, config, label="live session", user_session=True))
     return 0
 
 
 def cmd_replay(args) -> int:
     config = _load(args)
-    pipe = Pipeline(config, _make_sink(args, config), _audit(args, config), on_event=_printer)
+    pipe = Pipeline(
+        config,
+        _make_sink(args, config),
+        _audit(args, config),
+        on_event=_printer,
+        on_warning=_warner,
+    )
     stats = pipe.run(replay_features(Path(args.file)))
     print()
     print(format_summary(stats, config, label=f"replay {args.file}"))
@@ -348,10 +385,15 @@ def cmd_explain(args) -> int:
     if not records:
         print("log is empty")
         return 0
-    print(f"{len(records)} record(s) in {path}\n")
-    for record in records:
+    # The end-of-session record is a record but not an event. Rendering it with
+    # the event renderer used to produce a line that read like a declined
+    # command called "unknown" -- on the one surface a carer is meant to read.
+    sessions = [r for r in records if is_session(r)]
+    events = [r for r in records if not is_session(r)]
+    print(f"{len(events)} record(s) in {path}\n")
+    for record in events:
         print(render_record(record))
-    declined = [r for r in records if not r.get("allowed")]
+    declined = [r for r in events if not r.get("allowed")]
     if declined:
         print("\ndeclined, by reason:")
         counts: dict = {}
@@ -359,6 +401,10 @@ def cmd_explain(args) -> int:
             counts[r.get("reason", "?")] = counts.get(r.get("reason", "?"), 0) + 1
         for reason, n in sorted(counts.items()):
             print(f"  {reason:<24}{n}")
+    if sessions:
+        print()
+        for record in sessions:
+            print(render_session(record))
     return 0
 
 
@@ -535,6 +581,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--move", type=float, default=6.0, help="seconds of holding the movement")
     p.add_argument("--camera", type=int, default=None)
     p.add_argument("--seed", type=int, default=7, help="only with --source synthetic")
+    p.add_argument(
+        "--session",
+        help="where to save the captured session for later `ito replay` "
+        "(default: next to the fitted config; on by default for the camera)",
+    )
+    p.add_argument("--no-session", action="store_true", help="do not save the captured session")
     p.set_defaults(func=cmd_calibrate)
 
     p = sub.add_parser("review", help="mark each command as intended, and get a rate per hour")

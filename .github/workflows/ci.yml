@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ["3.10", "3.12", "3.13"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,6 +24,10 @@ jobs:
           pip install -e ".[dev]"
       - name: lint
         run: ruff check src tests
+      # Formatting is checked as well as linted: a diff nobody can read is a
+      # review nobody performs.
+      - name: format
+        run: ruff format --check src tests
       - name: tests
         run: pytest -q
       - name: the chain runs without a camera
@@ -32,3 +36,10 @@ jobs:
         run: ito config check configs/example.yaml
       - name: calibration produces a valid config
         run: ito calibrate --source synthetic -o calibrated.yaml && ito config check calibrated.yaml
+      # An editable install hides packaging mistakes: entry points, missing
+      # package data, a stale build backend. This is the check a user's
+      # `pip install` actually performs.
+      - name: installs from a built package, not only from the source tree
+        run: pip install --force-reinstall --no-deps .
+      - name: the installed entry point still runs
+        run: ito demo --no-audit

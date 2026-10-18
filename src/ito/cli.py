@@ -65,19 +65,42 @@ def _load(args) -> Config:
     return load(found)
 
 
+def _mqtt_credentials(config: Config) -> tuple[str | None, str | None]:
+    """MQTT username and password, preferring environment over the config file.
+
+    The config is plain text and gets pasted into issues and bug reports, so a
+    password that lives in the file is one copy-paste away from leaking. The
+    environment is the safer home: set ITO_MQTT_USERNAME / ITO_MQTT_PASSWORD and
+    leave the file fields empty.
+    """
+    import os
+
+    username = os.environ.get("ITO_MQTT_USERNAME")
+    password = os.environ.get("ITO_MQTT_PASSWORD")
+    if username is not None or password is not None:
+        # Either env var is set: use the environment, falling back to the file
+        # only for whichever side the environment did not provide.
+        return (
+            username if username is not None else config.mqtt.get("username"),
+            password if password is not None else config.mqtt.get("password"),
+        )
+    return config.mqtt.get("username"), config.mqtt.get("password")
+
+
 def _make_sink(args, config: Config):
     sinks: list[Sink] = []
     if not getattr(args, "quiet", False):
         sinks.append(ConsoleSink())
     if getattr(args, "mqtt", False):
         m = config.mqtt
+        username, password = _mqtt_credentials(config)
         sinks.append(
             MqttSink(
                 host=str(m.get("host", "localhost")),
                 port=int(m.get("port", 1883)),
                 client_id=str(m.get("client_id", "intent-to-object")),
-                username=m.get("username"),
-                password=m.get("password"),
+                username=username,
+                password=password,
                 qos=int(m.get("qos", 0)),
                 retain=bool(m.get("retain", False)),
             )
@@ -373,7 +396,10 @@ def cmd_run(args) -> int:
     else:
         print("dry run: intents are printed and logged but not published (add --mqtt)")
     if record_to:
-        print(f"recording landmarks to {record_to} -- treat the file as personal data")
+        print(
+            f"recording face landmarks to {record_to} -- contains no picture, but it is "
+            "a measurement of one face; treat it like a photo"
+        )
     print()
     try:
         stats = pipe.run(source)
@@ -407,6 +433,23 @@ def cmd_replay(args) -> int:
 
 def cmd_record(args) -> int:
     path = Path(args.out)
+    # Landmarks are a measurement of a specific face, not an anonymous log line.
+    # Say what is about to be written *before* it is written, and make a person
+    # in a terminal confirm; a script (no tty) proceeds so automation still works.
+    print(
+        f"this writes face geometry (landmark coordinates) for {args.seconds:.0f}s to {path}.\n"
+        "it contains no picture, but it is a measurement of one person's face and\n"
+        "should be treated like a photo: do not commit it or send it to anyone."
+    )
+    if sys.stdin and sys.stdin.isatty():
+        print("continue? [y/N] ", end="", flush=True)
+        try:
+            answer = input().strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("cancelled; nothing was written")
+            return 0
     print(f"recording face landmarks to {path} for {args.seconds:.0f}s ...")
     from .sources import record_landmarks
 
@@ -422,7 +465,6 @@ def cmd_record(args) -> int:
         return 1
     print(f"wrote {frames} frames at ~{fps:.1f} fps")
     print(f"replay it with:  ito replay {path}")
-    print("landmarks are face geometry, but treat the file as personal data.")
     return 0
 
 

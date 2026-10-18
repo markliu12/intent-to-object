@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from ito.cli import main
+from ito.cli import _mqtt_credentials, main
 from ito.config import default_dict, load
 from ito.sources import SourceError
 
@@ -147,7 +147,8 @@ def test_run_can_record_the_session_it_just_saw(monkeypatch, tmp_path, capsys):
 
     assert seen["landmarks_out"] == out
     captured = capsys.readouterr().out
-    assert "recording landmarks" in captured
+    assert "recording face landmarks" in captured
+    assert "treat it like a photo" in captured
     assert "replay this session with" in captured
 
 
@@ -244,3 +245,80 @@ def test_setup_can_configure_a_held_blink(tmp_path, monkeypatch, capsys):
     action = load(tmp_path / "config.yaml").actions[0]
     assert action.scorer == "blink"
     assert action.topic == "ito/intent/hold_blink"
+
+
+def test_mqtt_credentials_prefer_the_environment_over_the_file(monkeypatch):
+    """A password in the config is one copy-paste away from leaking; the
+    environment is the safer home, so it must win when both are present."""
+    raw = default_dict()
+    raw["mqtt"]["username"] = "file_user"
+    raw["mqtt"]["password"] = "file_pass"
+    config = load(None)
+    config.mqtt.update(raw["mqtt"])
+
+    monkeypatch.setenv("ITO_MQTT_USERNAME", "env_user")
+    monkeypatch.setenv("ITO_MQTT_PASSWORD", "env_pass")
+    assert _mqtt_credentials(config) == ("env_user", "env_pass")
+
+
+def test_mqtt_credentials_fall_back_to_the_file_without_environment(monkeypatch):
+    raw = default_dict()
+    raw["mqtt"]["username"] = "file_user"
+    raw["mqtt"]["password"] = "file_pass"
+    config = load(None)
+    config.mqtt.update(raw["mqtt"])
+
+    monkeypatch.delenv("ITO_MQTT_USERNAME", raising=False)
+    monkeypatch.delenv("ITO_MQTT_PASSWORD", raising=False)
+    assert _mqtt_credentials(config) == ("file_user", "file_pass")
+
+
+def test_mqtt_credentials_environment_fills_only_what_it_sets(monkeypatch):
+    """Set only the password in the environment: the username still comes from
+    the file, so a half-migrated setup is not silently broken."""
+    raw = default_dict()
+    raw["mqtt"]["username"] = "file_user"
+    raw["mqtt"]["password"] = "file_pass"
+    config = load(None)
+    config.mqtt.update(raw["mqtt"])
+
+    monkeypatch.delenv("ITO_MQTT_USERNAME", raising=False)
+    monkeypatch.setenv("ITO_MQTT_PASSWORD", "env_pass")
+    assert _mqtt_credentials(config) == ("file_user", "env_pass")
+
+
+def test_record_warns_and_cancels_without_confirmation(monkeypatch, tmp_path, capsys):
+    """Face landmarks are a measurement of one person's face, so the command must
+    say so before writing, and stop when a person does not confirm."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    def fake_input(prompt=""):
+        return "n"
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    monkeypatch.setattr("ito.sources.record_landmarks", lambda *a, **k: (0, 0.0))
+
+    assert main(["record", str(tmp_path / "r.jsonl")]) == 0
+
+    captured = capsys.readouterr().out
+    assert "measurement of one person's face" in captured
+    assert "cancelled" in captured
+    assert not (tmp_path / "r.jsonl").exists()
+
+
+def test_record_proceeds_when_confirmed(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+    written = {}
+
+    def fake_record(path, **kwargs):
+        written["path"] = str(path)
+        return (5, 30.0)
+
+    monkeypatch.setattr("ito.sources.record_landmarks", fake_record)
+
+    assert main(["record", str(tmp_path / "r.jsonl")]) == 0
+
+    assert written["path"] == str(tmp_path / "r.jsonl")
+    assert "wrote 5 frames" in capsys.readouterr().out

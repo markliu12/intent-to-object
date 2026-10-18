@@ -222,10 +222,11 @@ def _validate_sections(cfg: Config) -> None:
             raise ConfigError(f"camera.{key} must be a non-negative integer, got {value!r}")
     if cfg.camera["width"] <= 0 or cfg.camera["height"] <= 0:
         raise ConfigError("camera.width and camera.height must be positive")
-    if cfg.mqtt.get("username"):
+    if cfg.mqtt.get("username") or cfg.mqtt.get("password"):
         cfg.warnings.append(
             "mqtt.username/password are stored in plain text in this file; delete them "
-            "before pasting the config into an issue or a bug report"
+            "before pasting the config into an issue, or set ITO_MQTT_USERNAME / "
+            "ITO_MQTT_PASSWORD in the environment and leave these fields empty"
         )
 
 

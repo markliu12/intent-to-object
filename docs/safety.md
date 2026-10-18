@@ -52,11 +52,11 @@ The false-trigger rate is measured with an exposure denominator and reported nex
 ## Data handling
 
 - **Video frames are never written to disk.** They exist in memory for the duration of a frame.
-- **`ito record` writes face landmarks, not images.** They are still personal data: a landmark file is a measurement of a specific person's face. Treat it like a photo. Do not commit one, do not send one to a maintainer.
+- **`ito record` writes face landmarks, not images.** They are still personal data: a landmark file is a measurement of a specific person's face. Treat it like a photo. Do not commit one, do not send one to a maintainer. The command says this up front and, on a terminal, asks for confirmation before writing; a script (no tty) proceeds without one so automation still works.
 - **Nothing is transmitted** except the MQTT payload you configured, to the broker you configured. There is no telemetry, no analytics, no update check.
 - **The audit log** contains timestamps, action names, confidence values and dwell times. It contains no imagery. It does reveal when a person was awake and issuing commands — treat it as health-adjacent data and keep it where you keep other care records.
 - **`ito review` writes `<log>.review.json` next to the log.** It contains one human judgement per command about whether that command was intended, which is a stronger statement about a person than anything in the audit log. It is gitignored; keep it with the log, and delete both together.
-- **The config may contain MQTT credentials in plain text.** The loader warns when it does. If you paste a config into an issue, delete `mqtt.username` and `mqtt.password` first — a safety report is not a reason to publish a broker password.
+- **The config may contain MQTT credentials in plain text.** The loader warns when it does. Prefer the environment: set `ITO_MQTT_USERNAME` / `ITO_MQTT_PASSWORD`, leave the config fields empty, and the sink reads the environment first. If you paste a config into an issue, delete `mqtt.username` and `mqtt.password` first — a safety report is not a reason to publish a broker password.
 
 ## Reporting a safety problem
 

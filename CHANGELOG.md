@@ -4,6 +4,18 @@
 
 ### Changed
 
+- **MQTT credentials can live in the environment instead of the config file.**
+  Set `ITO_MQTT_USERNAME` / `ITO_MQTT_PASSWORD` and leave the config fields
+  empty; the sink reads the environment first. The config is plain text and gets
+  pasted into issues, so a password that lives there is one copy-paste away from
+  leaking.
+- **`ito record` says what it is about to write, before it writes it.** Face
+  landmarks contain no picture but are a measurement of one person's face, so
+  the command now warns up front and, on a terminal, asks for confirmation; a
+  script (no tty) proceeds so automation still works.
+
+### Changed (earlier in this release)
+
 - **The camera works on Python 3.13+ again.** MediaPipe removed the legacy
   `solutions.face_mesh` API this project depended on, and its modern
   `FaceLandmarker` needs an explicit model file. `sources.py` now prefers

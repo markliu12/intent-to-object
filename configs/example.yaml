@@ -1,0 +1,66 @@
+# intent-to-object configuration
+#
+# Two rules, both deliberate:
+#   * one action, one movement -- add a second only once the first is reliable
+#   * risk: low | medium | high. High is refused at load time. That is not a
+#     missing feature, it is the safety boundary. See docs/safety.md.
+
+camera:
+  index: 0
+  width: 640
+  height: 480
+
+perception:
+  # rolling window used to learn this person's open-eye value
+  baseline_window_s: 20.0
+  baseline_min_samples: 15
+
+mqtt:
+  host: localhost
+  port: 1883
+  client_id: intent-to-object
+  qos: 0
+  retain: false
+
+policy:
+  rate_limit_per_min: 20
+  allow_medium: false
+
+output:
+  audit_path: logs/audit.jsonl
+
+actions:
+  - name: tilt_left
+    scorer: tilt
+    scorer_params:
+      # score starts leaving zero at start_deg and saturates at full_deg
+      start_deg: 5.0
+      full_deg: 13.0
+      direction: left        # left | right | any
+      neutral_deg: 0.0       # set this if the resting posture is not upright
+    gate:
+      # quoted on purpose: an unquoted `on:` is a YAML 1.1 boolean. The loader
+      # accepts both spellings, but quoted is what you want in your own file.
+      "on": 0.5              # enter candidate state
+      "off": 0.35            # hysteretic release
+      dwell_ms: 450          # must be held this long; 450 excludes most blinks
+      cooldown_ms: 1800      # and must be released before it can fire again
+    risk: low
+    topic: ito/intent/tilt_left
+    payload: '{"intent":"${action}","confidence":${score},"held_ms":${dwell_ms},"ts_ms":${t_ms},"source":"intent-to-object"}'
+
+  # A second action, commented out on purpose. Uncomment only after tilt_left
+  # has weeks of clean logs behind it.
+  #
+  # - name: hold_blink
+  #   scorer: blink
+  #   scorer_params:
+  #     start_ratio: 0.30
+  #     full_ratio: 0.62
+  #   gate:
+  #     on: 0.5
+  #     off: 0.35
+  #     dwell_ms: 700
+  #     cooldown_ms: 2500
+  #   risk: medium          # medium = someone must confirm each send
+  #   topic: ito/intent/hold_blink

@@ -1,0 +1,25 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# runtime output
+logs/
+*.jsonl
+
+# recordings of a person's face geometry -- personal data, never commit
+recordings/
+*.landmarks.jsonl
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

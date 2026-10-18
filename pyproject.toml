@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "intent-to-object"
+version = "0.1.0"
+description = "Local-first adapter that turns small voluntary movements into MQTT intents for ordinary objects."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Intent-to-Object contributors" }]
+keywords = ["assistive-technology", "accessibility", "mediapipe", "mqtt", "local-first"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Home Automation",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+dependencies = ["numpy>=1.23", "pyyaml>=6.0"]
+
+[project.optional-dependencies]
+camera = ["opencv-python>=4.8", "mediapipe>=0.10"]
+mqtt = ["paho-mqtt>=2.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+ito = "ito.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

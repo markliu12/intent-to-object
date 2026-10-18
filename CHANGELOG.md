@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.3.0
+
+The theme: **the first run is one command and one question.** Everything in
+0.2.1 made the tool honest; none of it made the tool reachable by the person it
+is for. This release is about the distance between "there is a repository" and
+"a carer is running it".
+
+### Added
+
+- **`ito setup`.** From an installed package to a calibrated `config.yaml`:
+  checks the machine, asks which movement will be used (tilt left, tilt right,
+  or eyes held closed — in those words, not scorer names), records rest and
+  movement, fits, verifies that the fitted thresholds actually fire, and writes
+  the file with a comment per number. It replaces a sequence of five commands
+  and one YAML edit, which was defensible step by step and absurd as a whole.
+- **`config.yaml` in the working directory is discovered automatically**, so the
+  file `setup` just wrote is the file `run` reads. Before this, `setup` would
+  have written a config that `ito run` silently ignored in favour of the
+  built-in defaults — the exact "looks calibrated, is not" failure this project
+  keeps arguing against.
+- The generated config carries a one-line explanation of every threshold, so the
+  person who edits it in a month does not have to open the documentation.
+
+### Changed
+
+- `calibrate` and `setup` share one capture path, so the sentence a person hears
+  before each phase exists in one place.
+- Piped output is line-buffered. A transcript pasted into a message used to show
+  the error before the banner that explained what was running.
+
 ## 0.2.1
 
 Everything here came out of an adversarial read of 0.2 rather than from a

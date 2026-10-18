@@ -16,7 +16,7 @@ from importlib.metadata import PackageNotFoundError, version
 # fallback covers running straight from a checkout without installing, and
 # tests/test_version.py fails if the two ever disagree -- which is how the code
 # came to report 0.1.0 while the README showed 0.2.0.
-_FALLBACK_VERSION = "0.2.1"
+_FALLBACK_VERSION = "0.3.0"
 
 try:
     __version__ = version("intent-to-object")

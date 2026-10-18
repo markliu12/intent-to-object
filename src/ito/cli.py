@@ -9,6 +9,8 @@ only two potential contributors.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import importlib.util
 import platform
 import socket
 import sys
@@ -20,7 +22,7 @@ import yaml
 from . import __version__
 from .audit import AuditLog, is_session, read_jsonl, render_record, render_session
 from .calibrate import NOT_SEPARABLE, fit, verify, write_config, write_session
-from .config import Config, ConfigError, load
+from .config import DEFAULT_PAYLOAD, Config, ConfigError, default_dict, from_dict, load
 from .pipeline import Pipeline
 from .policy import StdinConfirmer
 from .report import format_summary
@@ -29,10 +31,38 @@ from .sources import SourceError, camera_features, replay_features, synthetic_fe
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# `ito setup` writes the first of these. Discovering it means the file the
+# setup wizard just wrote is the file `ito run` reads, without anybody having to
+# remember a flag -- which is the difference between a working first run and a
+# person running the built-in defaults while believing they calibrated.
+CONFIG_NAMES = ("config.yaml", "ito.yaml")
+
+
+def _discover_config() -> Path | None:
+    for name in CONFIG_NAMES:
+        candidate = Path(name)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+# One movement, chosen in words rather than in a scorer name. The default config
+# teaches the vocabulary; `ito setup` should not require learning it first.
+_SETUP_CHOICES = {
+    "1": ("tilt", "left", "tilt_left", "head tilts to your left"),
+    "2": ("tilt", "right", "tilt_right", "head tilts to your right"),
+    "3": ("blink", None, "hold_blink", "eyes held closed"),
+}
+
 
 def _load(args) -> Config:
-    path = Path(args.config) if getattr(args, "config", None) else None
-    return load(path)
+    explicit = getattr(args, "config", None)
+    if explicit:
+        return load(Path(explicit))
+    found = _discover_config()
+    if found is not None:
+        print(f"using {found} (found in this directory)", file=sys.stderr)
+    return load(found)
 
 
 def _make_sink(args, config: Config):
@@ -122,6 +152,34 @@ def _default_out(args) -> Path:
     )
 
 
+def _capture_pair(config, args, scorer: str) -> tuple[list, list]:
+    """Collect the rest and movement phases a fit needs.
+
+    Shared by ``calibrate`` and ``setup`` so the sentence a person hears before
+    each phase is written once, and so the scripted path stays testable without
+    a camera.
+    """
+    if args.source == "synthetic":
+        print("no camera, no model: this exercises the fit and the verification, not a person")
+        rest = list(synthetic_features(script=(("idle", args.rest),), fps=30.0, seed=args.seed))
+        phase = "blink" if scorer == "blink" else "tilt"
+        move = list(synthetic_features(script=((phase, args.move),), fps=30.0, seed=args.seed + 1))
+        return rest, move
+
+    print()
+    print("  rest   sit as you normally would. Head resting naturally, face the camera.")
+    print(f"         recording {args.rest:.0f}s -- do not perform the movement yet")
+    _countdown()
+    rest = list(_camera_source(config, args, args.rest))
+    print(f"         {len(rest)} frames")
+    print()
+    print(f"  move   now perform the movement and keep holding it for {args.move:.0f}s")
+    _countdown()
+    move = list(_camera_source(config, args, args.move))
+    print(f"         {len(move)} frames")
+    return rest, move
+
+
 def cmd_calibrate(args) -> int:
     started = time.perf_counter()
     config = _load(args)
@@ -133,23 +191,7 @@ def cmd_calibrate(args) -> int:
     origin = "a scripted session" if args.source == "synthetic" else "the camera"
     print(f"fitting `{name}` ({scorer}) from {origin}")
 
-    if args.source == "synthetic":
-        print("no camera, no model: this exercises the fit and the verification, not a person")
-        rest = list(synthetic_features(script=(("idle", args.rest),), fps=30.0, seed=args.seed))
-        phase = "blink" if scorer == "blink" else "tilt"
-        move = list(synthetic_features(script=((phase, args.move),), fps=30.0, seed=args.seed + 1))
-    else:
-        print()
-        print("  step 1  sit as you normally would. Head resting naturally, face the camera.")
-        print(f"          recording {args.rest:.0f}s of rest -- do not perform the movement yet")
-        _countdown()
-        rest = list(_camera_source(config, args, args.rest))
-        print(f"          {len(rest)} frames")
-        print()
-        print(f"  step 2  now perform the movement and keep holding it for {args.move:.0f}s")
-        _countdown()
-        move = list(_camera_source(config, args, args.move))
-        print(f"          {len(move)} frames")
+    rest, move = _capture_pair(config, args, scorer)
 
     if len(rest) < 10 or len(move) < 10:
         raise SourceError(
@@ -468,7 +510,7 @@ def cmd_doctor(args) -> int:
 
     config_path = getattr(args, "config", None)
     try:
-        config = load(Path(config_path) if config_path else None)
+        config = load(Path(config_path) if config_path else _discover_config())
         print(
             f"config           ok, {len(config.actions)} action(s): "
             + ", ".join(f"{a.name}({a.risk})" for a in config.actions)
@@ -492,6 +534,150 @@ def cmd_doctor(args) -> int:
     return 0 if ok else 1
 
 
+def _module_missing(name: str) -> bool:
+    """True when a module cannot be imported, without importing it."""
+    try:
+        return importlib.util.find_spec(name) is None
+    except (ImportError, ValueError):
+        return True
+
+
+def _setup_action(choice: str) -> dict:
+    scorer, direction, name, _ = _SETUP_CHOICES[choice]
+    if scorer == "tilt":
+        params = {"start_deg": 5.0, "full_deg": 13.0, "direction": direction, "neutral_deg": 0.0}
+    else:
+        params = {"start_ratio": 0.30, "full_ratio": 0.62}
+    return {
+        "name": name,
+        "scorer": scorer,
+        "scorer_params": params,
+        "gate": {
+            "on": 0.5,
+            "off": 0.35,
+            "dwell_ms": 450,
+            "cooldown_ms": 1800,
+            "release_ms": 150,
+        },
+        # Risk is about what this switches, not about which movement triggers it.
+        # A lamp on a blink is still a lamp.
+        "risk": "low",
+        "topic": f"ito/intent/{name}",
+        "payload": DEFAULT_PAYLOAD,
+    }
+
+
+def _ask_choice() -> str:
+    if not sys.stdin or not sys.stdin.isatty():
+        raise ConfigError(
+            "`ito setup` asks which movement to use, so it needs a terminal. "
+            "Pass --choice 1|2|3 to answer that without one."
+        )
+    print("       > ", end="", flush=True)
+    return input().strip()
+
+
+def cmd_setup(args) -> int:
+    """One command from a fresh checkout to a calibrated config.
+
+    The chain it replaces was: read the README, install an extra, run doctor,
+    edit two numbers in YAML, run calibrate, copy the fitted file over the one
+    you just edited. Each step is defensible on its own and the sequence is not
+    something to ask of the person who will actually use this.
+    """
+    need_camera = args.source != "synthetic"
+    print(f"intent-to-object {__version__}  |  first run")
+    print()
+    print("  1/3  this machine")
+
+    required = [("numpy", "pip install numpy"), ("yaml", "pip install pyyaml")]
+    if need_camera:
+        required += [
+            ("cv2", "pip install '.[camera]'"),
+            ("mediapipe", "pip install '.[camera]'  (Python 3.10-3.12)"),
+        ]
+    missing = [(module, fix) for module, fix in required if _module_missing(module)]
+    if missing:
+        for module, fix in missing:
+            print(f"       {module:<10} missing -- {fix}")
+        print()
+        print("       install those, then run `ito setup` again.")
+        print("       `ito doctor` reports the same thing with more detail.")
+        return 2
+    print("       ok")
+
+    print()
+    print("  2/3  which movement will you use?")
+    for key, (_, _, name, plain) in _SETUP_CHOICES.items():
+        print(f"       {key}  {plain}  -> {name}")
+    choice = args.choice if args.choice is not None else _ask_choice()
+    if choice not in _SETUP_CHOICES:
+        raise ConfigError("choose 1, 2 or 3: tilt left, tilt right, or eyes held closed")
+    action = _setup_action(choice)
+    name = str(action["name"])
+    print(f"       using {name}")
+
+    raw = default_dict()
+    raw["actions"] = [action]
+    config = from_dict(raw)
+
+    print()
+    print("  3/3  the camera" if need_camera else "  3/3  the scripted session")
+    rest, move = _capture_pair(config, args, str(action["scorer"]))
+    if len(rest) < 10 or len(move) < 10:
+        raise SourceError(
+            "not enough usable frames. Was a face visible the whole time? "
+            "Try a brighter room or a smaller distance to the camera."
+        )
+
+    suggestion = fit(config, name, rest, move)
+    print()
+    print(f"  verdict    {suggestion.verdict}")
+    for note in suggestion.notes:
+        print(f"             {note}")
+
+    if suggestion.verdict == NOT_SEPARABLE:
+        print()
+        print("  nothing was written: thresholds that cannot be told apart from rest")
+        print("  would fire on their own. Try a larger movement, or a different body part.")
+        return 3
+
+    ok, dwell = verify(config, name, suggestion.params, rest, move, suggestion.gate)
+    if not ok:
+        print("  verified   FAILED: the recorded movement does not fire under these thresholds")
+        print("  nothing was written. Try again with a larger movement.")
+        return 3
+    print(f"  verified   a command fires after {dwell} ms of holding")
+
+    raw["actions"][0]["scorer_params"].update(suggestion.params)
+    raw["actions"][0]["gate"].update(suggestion.gate)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        "# written by `ito setup` from one session\n"
+        "#\n"
+        "#   start_deg    score leaves zero here -- raise it if it fires on its own\n"
+        "#   full_deg     score reaches 1.0 here -- lower it if it never fires\n"
+        "#   dwell_ms     how long the movement must be held (lowered to what you can hold)\n"
+        "#   cooldown_ms  the earliest it can fire again\n"
+        "#   release_ms   how long you must be released before it can re-arm\n"
+        "#\n"
+        "# `ito run` in this directory reads this file without a flag.\n"
+        + yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    if not args.no_session:
+        session = write_session(out.with_suffix(".session.jsonl"), rest, move)
+        print(f"  session    {session}  (replay it with `ito replay {session}`)")
+
+    print(f"  saved      {out}")
+    print()
+    print("  two commands from here:")
+    print("    ito run --show     watch it decide, nothing is published")
+    print("    ito run --mqtt     publish to the broker in this file")
+    return 0
+
+
 def cmd_config(args) -> int:
     from .config import default_dict
 
@@ -504,7 +690,7 @@ def cmd_config(args) -> int:
         return 0
     if args.action == "check":
         try:
-            config = load(Path(args.file) if args.file else None)
+            config = load(Path(args.file) if args.file else _discover_config())
         except ConfigError as exc:
             print(f"INVALID: {exc}", file=sys.stderr)
             return 1
@@ -585,6 +771,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(func=cmd_run)
 
+    p = sub.add_parser(
+        "setup",
+        help="first run: check the machine, choose one movement, calibrate, write a config",
+    )
+    p.add_argument(
+        "-o",
+        "--out",
+        default="config.yaml",
+        help="where to write the config (default ./config.yaml)",
+    )
+    p.add_argument("--choice", help="answer the movement question up front: 1, 2 or 3")
+    p.add_argument("--source", choices=["camera", "synthetic"], default="camera")
+    p.add_argument("--camera", type=int, default=None)
+    p.add_argument("--rest", type=float, default=8.0, help="seconds of resting posture")
+    p.add_argument("--move", type=float, default=6.0, help="seconds of holding the movement")
+    p.add_argument("--seed", type=int, default=7, help="only with --source synthetic")
+    p.add_argument("--show", action="store_true", help="show the camera while calibrating")
+    p.add_argument("--no-session", action="store_true", help="do not save the captured session")
+    p.set_defaults(func=cmd_setup)
+
     p = sub.add_parser("calibrate", help="fit thresholds to this person in about 20 seconds")
     p.add_argument("-c", "--config")
     p.add_argument("-o", "--out", help="where to write the fitted config")
@@ -639,6 +845,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list | None = None) -> int:
+    # When the output is piped or redirected it is block-buffered, so the
+    # banner can appear *after* an error that was printed to stderr -- which
+    # makes a pasted transcript unreadable at exactly the moment someone is
+    # asking for help with it.
+    if hasattr(sys.stdout, "reconfigure"):
+        with contextlib.suppress(OSError, ValueError):  # depends on the stream
+            sys.stdout.reconfigure(line_buffering=True)
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

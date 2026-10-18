@@ -7,7 +7,10 @@ record rendered as a "declined command called unknown" both survived to 0.2.
 import json
 from pathlib import Path
 
+import yaml
+
 from ito.cli import main
+from ito.config import default_dict, load
 from ito.sources import SourceError
 
 REPO = Path(__file__).resolve().parents[1]
@@ -179,3 +182,65 @@ def test_config_init_prints_something_that_loads(capsys):
     assert main(["config", "init"]) == 0
     text = capsys.readouterr().out
     assert from_dict(yaml.safe_load(text)).actions
+
+
+def test_setup_writes_a_config_that_is_found_again_without_a_flag(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["setup", "--source", "synthetic", "--choice", "1"]) == 0
+
+    written = tmp_path / "config.yaml"
+    assert written.exists()
+    assert load(written).actions[0].name == "tilt_left"
+    assert main(["config", "check"]) == 0
+
+
+def test_setup_offers_three_movements_and_they_are_not_the_same_action():
+    from ito.cli import _setup_action
+
+    left, right, blink = (_setup_action("1"), _setup_action("2"), _setup_action("3"))
+    assert left["scorer_params"]["direction"] == "left"
+    assert right["scorer_params"]["direction"] == "right"
+    assert left["topic"] != right["topic"]
+    assert blink["scorer"] == "blink"
+
+
+def test_setup_refuses_a_choice_it_does_not_have(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["setup", "--source", "synthetic", "--choice", "9"]) == 2
+
+    assert "choose 1, 2 or 3" in capsys.readouterr().err
+    assert not (tmp_path / "config.yaml").exists()
+
+
+def test_setup_asks_rather_than_guessing_when_there_is_no_terminal(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["setup", "--source", "synthetic"]) == 2
+
+    assert "--choice" in capsys.readouterr().err
+
+
+def test_a_config_in_the_working_directory_is_used_without_a_flag(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    raw = default_dict()
+    raw["actions"][0]["name"] = "probe"
+    raw["actions"][0]["topic"] = "ito/intent/probe"
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    assert main(["demo", "--no-audit"]) == 0
+
+    out, err = capsys.readouterr()
+    assert "probe" in out
+    assert "using config.yaml" in err
+
+
+def test_setup_can_configure_a_held_blink(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["setup", "--source", "synthetic", "--choice", "3"]) == 0
+
+    action = load(tmp_path / "config.yaml").actions[0]
+    assert action.scorer == "blink"
+    assert action.topic == "ito/intent/hold_blink"

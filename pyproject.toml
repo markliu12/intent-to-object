@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "intent-to-object"
-version = "0.2.1"
+version = "0.3.0"
 description = "Local-first adapter that turns small voluntary movements into MQTT intents for ordinary objects."
 readme = "README.md"
 # 3.9 is past end of life and MediaPipe never supported it; keeping the floor at

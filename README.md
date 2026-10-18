@@ -12,13 +12,14 @@ Nothing leaves the machine. No account, no subscription, no cloud.
 
 ---
 
-## Status: v0.2.1, working end to end, and it measures itself
+## Status: v0.3.0, working end to end, and it measures itself
 
 | | |
 |---|---|
 | Perception | MediaPipe Face Mesh (478 landmarks), CPU, no GPU |
 | Intent | geometric baseline: head roll, eye-aspect ratio, both with a dwell gate |
 | Output | MQTT publish, or console only |
+| First run | `ito setup` — checks the machine, asks one question, calibrates, writes `config.yaml` |
 | Calibration | `ito calibrate` fits thresholds from 20 seconds of movement, lowers the dwell to what you can actually hold, and refuses when the movement is not separable from rest |
 | Measurement | latency, false triggers per hour, missed commands, and re-calibration time are produced by the tool, not estimated by hand |
 | Platforms | Python 3.10+ for the core; Python 3.10–3.12 for the camera |
@@ -36,7 +37,7 @@ ito demo
 ```
 
 ```text
-intent-to-object 0.2.1  |  scripted session, 1 action(s): tilt_left
+intent-to-object 0.3.0  |  scripted session, 1 action(s): tilt_left
 (no camera, no model -- this exercises the gate/policy/publish chain only)
 
   -> ito/intent/tilt_left  {"intent":"tilt_left","confidence":1.0,"held_ms":467,"ts_ms":3667,...}
@@ -73,7 +74,13 @@ MediaPipe has no wheels for Python 3.13+ yet, so use 3.10–3.12:
 ```bash
 python3.12 -m venv .venv && . .venv/bin/activate
 pip install -e ".[camera]"
-ito doctor            # tells you what is missing, if anything
+ito setup
+```
+
+`ito setup` checks this machine, asks which movement you will use (tilt left, tilt right, or eyes held closed), records twenty seconds of rest and movement, fits the thresholds, verifies that they fire, and writes `config.yaml`. `ito run` in that directory reads that file without a flag — so the first real run is one command and one question, not an edit to a YAML file you have not seen before.
+
+```bash
+ito doctor            # what is missing, if anything
 ito run --show        # dry run: prints and logs intents, publishes nothing
 ```
 
@@ -157,7 +164,7 @@ src/ito/
   sinks.py       console, MQTT, payload templating
   audit.py       decision log + human-readable rendering
   report.py      session summary
-  cli.py         doctor / demo / run / calibrate / review / record / replay / explain / config / selftest
+  cli.py         setup / doctor / demo / run / calibrate / review / record / replay / explain / config / selftest
 ```
 
 Only `sources.py` touches MediaPipe and only `sinks.py` touches paho, which is why `pytest` runs green on a machine with no camera and no broker.
